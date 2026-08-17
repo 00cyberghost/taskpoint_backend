@@ -166,6 +166,7 @@ class AdminReviewController extends Controller
                 [
                     'submission_id' => $submission->id,
                     'assignment_id' => $submission->assignment_id,
+                    'campaign_id' => $submission->assignment?->campaign_id,
                 ],
             );
 
@@ -177,6 +178,7 @@ class AdminReviewController extends Controller
                 [
                     'submission_id' => $submission->id,
                     'assignment_id' => $submission->assignment_id,
+                    'campaign_id' => $submission->assignment?->campaign_id,
                 ],
             );
         });
@@ -232,6 +234,7 @@ class AdminReviewController extends Controller
                 [
                     'submission_id' => $submission->id,
                     'assignment_id' => $submission->assignment_id,
+                    'campaign_id' => $submission->assignment?->campaign_id,
                 ],
             );
         });

@@ -59,7 +59,11 @@ class ClientReviewController extends Controller
             'client_review_update',
             'Client reviewed your submission',
             'Your submission passed client review and is waiting for final system confirmation.',
-            ['submission_id' => $submission->id]
+            [
+                'submission_id' => $submission->id,
+                'assignment_id' => $submission->assignment_id,
+                'campaign_id' => $submission->assignment?->campaign_id,
+            ]
         );
 
         return response()->json([
@@ -97,7 +101,11 @@ class ClientReviewController extends Controller
             'client_review_update',
             'Client requested a rejection review',
             'A client raised a concern on your submission. Admin review may follow.',
-            ['submission_id' => $submission->id]
+            [
+                'submission_id' => $submission->id,
+                'assignment_id' => $submission->assignment_id,
+                'campaign_id' => $submission->assignment?->campaign_id,
+            ]
         );
 
         return response()->json([
