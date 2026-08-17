@@ -3,15 +3,21 @@
 use App\Models\Campaign;
 use App\Models\ClientFundingRequest;
 use App\Models\ClientProfile;
+use App\Models\EmailVerificationOtp;
 use App\Models\PlatformPaymentSetting;
 use App\Models\TaskAssignment;
 use App\Models\TaskTypePricing;
 use App\Models\TaskSubmission;
 use App\Models\User;
 use App\Models\Wallet;
+use App\Services\GoogleIdentityService;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
+use App\Mail\EmailVerificationOtpMail;
 
 it('registers a client and creates the client profile', function () {
+    Mail::fake();
+
     $response = $this
         ->withHeaders(['CF-IPCountry' => 'NG'])
         ->postJson('/api/auth/register', [
@@ -30,6 +36,87 @@ it('registers a client and creates the client profile', function () {
 
     expect(ClientProfile::query()->where('user_id', $user->id)->exists())->toBeTrue();
     expect($user->registration_country)->toBe('NG');
+    expect(EmailVerificationOtp::query()->where('user_id', $user->id)->exists())->toBeTrue();
+    Mail::assertSent(EmailVerificationOtpMail::class);
+});
+
+it('blocks unverified clients from protected platform routes', function () {
+    $client = User::factory()->unverified()->create([
+        'role' => 'client',
+        'status' => 'active',
+    ]);
+
+    ClientProfile::query()->create(['user_id' => $client->id]);
+
+    Sanctum::actingAs($client);
+
+    $this->getJson('/api/client/dashboard')
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Please verify your email address before using the platform.');
+});
+
+it('verifies a client email with otp', function () {
+    $client = User::factory()->unverified()->create([
+        'role' => 'client',
+        'status' => 'active',
+    ]);
+
+    ClientProfile::query()->create(['user_id' => $client->id]);
+
+    EmailVerificationOtp::query()->create([
+        'user_id' => $client->id,
+        'code_hash' => bcrypt('654321'),
+        'attempts' => 0,
+        'expires_at' => now()->addMinutes(10),
+        'sent_at' => now(),
+    ]);
+
+    Sanctum::actingAs($client);
+
+    $this->postJson('/api/auth/email/verify-otp', [
+        'otp' => '654321',
+    ])->assertOk()->assertJsonPath('message', 'Email verified successfully.');
+
+    expect($client->fresh()->hasVerifiedEmail())->toBeTrue();
+    expect(EmailVerificationOtp::query()->where('user_id', $client->id)->exists())->toBeFalse();
+});
+
+it('logs a client in with google and reuses an existing email-matched account', function () {
+    $client = User::factory()->unverified()->create([
+        'role' => 'client',
+        'email' => 'google.client@example.com',
+    ]);
+
+    ClientProfile::query()->create(['user_id' => $client->id]);
+
+    app()->instance(GoogleIdentityService::class, new class extends GoogleIdentityService
+    {
+        public function verify(string $idToken): array
+        {
+            expect($idToken)->toBe('client-google-token');
+
+            return [
+                'sub' => 'google-client-456',
+                'email' => 'google.client@example.com',
+                'email_verified' => true,
+                'name' => 'Google Client',
+            ];
+        }
+    });
+
+    $response = $this->postJson('/api/auth/google', [
+        'id_token' => 'client-google-token',
+        'role' => 'client',
+        'device_name' => 'ios-test',
+    ]);
+
+    $response
+        ->assertOk()
+        ->assertJsonPath('user.role', 'client')
+        ->assertJsonPath('user.email', 'google.client@example.com');
+
+    expect($client->fresh()->google_id)->toBe('google-client-456');
+    expect($client->fresh()->hasVerifiedEmail())->toBeTrue();
 });
 
 it('lets a client create campaigns and fetch dashboard data', function () {
@@ -235,4 +322,75 @@ it('lists client review queue submissions', function () {
     $this->getJson('/api/client/reviews?status=client_review')
         ->assertOk()
         ->assertJsonCount(1, 'submissions.data');
+});
+
+it('blocks client account deletion while active campaigns still exist', function () {
+    $client = User::factory()->create([
+        'role' => 'client',
+        'email' => 'active-client@example.com',
+    ]);
+
+    ClientProfile::query()->create(['user_id' => $client->id]);
+
+    Campaign::query()->create([
+        'client_id' => $client->id,
+        'title' => 'Still active',
+        'task_type' => 'follow',
+        'target_url' => 'https://example.com/active',
+        'target_quantity' => 10,
+        'status' => 'active',
+    ]);
+
+    Sanctum::actingAs($client);
+
+    $this->deleteJson('/api/auth/account')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['account']);
+});
+
+it('deletes a client account safely and frees the original email for reuse', function () {
+    $client = User::factory()->create([
+        'role' => 'client',
+        'email' => 'delete-client@example.com',
+        'phone' => '08087654321',
+    ]);
+
+    ClientProfile::query()->create([
+        'user_id' => $client->id,
+        'company_name' => 'Delete Client Ltd',
+        'phone' => '08087654321',
+        'default_country_target' => 'NG',
+    ]);
+
+    Wallet::query()->create([
+        'user_id' => $client->id,
+        'wallet_type' => 'client_main',
+        'currency' => 'NGN',
+        'current_balance' => 0,
+        'pending_balance' => 0,
+        'withdrawable_balance' => 0,
+    ]);
+
+    Sanctum::actingAs($client);
+
+    $this->deleteJson('/api/auth/account')
+        ->assertOk()
+        ->assertJsonPath('message', 'Your account has been deleted successfully.');
+
+    $deletedUser = User::withTrashed()->findOrFail($client->id);
+
+    expect($deletedUser->deleted_at)->not->toBeNull();
+    expect($deletedUser->status)->toBe('deleted');
+    expect($deletedUser->email)->not->toBe('delete-client@example.com');
+    expect($deletedUser->email)->toContain('deleted-user-'.$client->id);
+    expect($deletedUser->clientProfile?->phone)->toBeNull();
+    expect($deletedUser->clientProfile?->company_name)->toBe('Deleted Client');
+
+    $this->postJson('/api/auth/register', [
+        'name' => 'Returning Client',
+        'email' => 'delete-client@example.com',
+        'password' => 'password',
+        'password_confirmation' => 'password',
+        'role' => 'client',
+    ])->assertCreated();
 });

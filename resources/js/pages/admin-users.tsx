@@ -1,4 +1,4 @@
-import { Head } from '@inertiajs/react';
+import { Head, router } from '@inertiajs/react';
 import { BadgeCheck, Building2, ShieldCheck, UserCircle2 } from 'lucide-react';
 import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
@@ -10,6 +10,8 @@ type UserItem = {
     email: string;
     role: string;
     status: string;
+    email_verified_at?: string | null;
+    deleted_at?: string | null;
     phone?: string | null;
     registration_country?: string | null;
     last_login_country?: string | null;
@@ -51,7 +53,7 @@ export default function AdminUsers({ users }: Props) {
                             <h1 className="text-2xl font-semibold text-stone-900">User Management</h1>
                             <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">
                                 Review clients, freelancers, and admins in one place, including verification state,
-                                location signals, and freelancer performance.
+                                location signals, email verification, moderation status, and freelancer performance.
                             </p>
                         </div>
                     </div>
@@ -67,16 +69,27 @@ export default function AdminUsers({ users }: Props) {
                                         <span className="rounded-full bg-stone-900 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
                                             {user.role}
                                         </span>
-                                        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-stone-700">
-                                            {user.status}
-                                        </span>
+                                        {user.deleted_at ? (
+                                            <span className="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                                                Deleted Account
+                                            </span>
+                                        ) : (
+                                            <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-stone-700">
+                                                {user.status}
+                                            </span>
+                                        )}
                                     </div>
                                     <p className="mt-2 text-sm text-stone-500">{user.email}</p>
+                                    {user.deleted_at ? (
+                                        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">
+                                            This user self-deleted their account. Personal data has been anonymized, login access has been revoked, and historical finance/task records were intentionally retained for reporting and audit integrity.
+                                        </div>
+                                    ) : null}
 
                                     <div className="mt-5 grid gap-3 md:grid-cols-3">
                                         <Metric
                                             icon={ShieldCheck}
-                                            label="Verification"
+                                            label="Profile Verification"
                                             value={
                                                 user.freelancerProfile?.verification_status ??
                                                 user.clientProfile?.verification_status ??
@@ -85,13 +98,13 @@ export default function AdminUsers({ users }: Props) {
                                         />
                                         <Metric
                                             icon={BadgeCheck}
-                                            label="Country"
-                                            value={user.last_login_country ?? user.registration_country ?? 'Unknown'}
+                                            label="Email Verification"
+                                            value={user.email_verified_at ? 'verified' : 'pending'}
                                         />
                                         <Metric
                                             icon={Building2}
-                                            label="Phone"
-                                            value={user.phone ?? 'Not provided'}
+                                            label="Country"
+                                            value={user.last_login_country ?? user.registration_country ?? 'Unknown'}
                                         />
                                     </div>
                                 </div>
@@ -117,12 +130,82 @@ export default function AdminUsers({ users }: Props) {
                                             </dd>
                                         </div>
                                         <div className="flex items-center justify-between gap-4">
+                                            <dt>Phone</dt>
+                                            <dd className="font-semibold text-stone-900">
+                                                {user.phone ?? 'Not provided'}
+                                            </dd>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-4">
                                             <dt>Registration country</dt>
                                             <dd className="font-semibold text-stone-900">
                                                 {user.registration_country ?? 'Unknown'}
                                             </dd>
                                         </div>
+                                        {user.deleted_at ? (
+                                            <div className="flex items-center justify-between gap-4">
+                                                <dt>Deleted at</dt>
+                                                <dd className="font-semibold text-red-700">
+                                                    {new Date(user.deleted_at).toLocaleString()}
+                                                </dd>
+                                            </div>
+                                        ) : null}
                                     </dl>
+
+                                    {!user.deleted_at && user.role !== 'admin' && user.role !== 'super_admin' ? (
+                                        <div className="mt-5 space-y-4 rounded-2xl border border-stone-200 bg-white p-4">
+                                            <div>
+                                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                                                    Account Status
+                                                </p>
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    {(['active', 'suspended', 'banned'] as const).map((status) => (
+                                                        <button
+                                                            key={status}
+                                                            type="button"
+                                                            onClick={() =>
+                                                                router.patch(`/admin/users/${user.id}/moderation`, { status })
+                                                            }
+                                                            className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${
+                                                                user.status === status
+                                                                    ? 'bg-stone-900 text-white'
+                                                                    : 'bg-stone-100 text-stone-700'
+                                                            }`}
+                                                        >
+                                                            {status}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+                                                    Profile Verification
+                                                </p>
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    {(['pending', 'verified', 'rejected'] as const).map((verificationStatus) => (
+                                                        <button
+                                                            key={verificationStatus}
+                                                            type="button"
+                                                            onClick={() =>
+                                                                router.patch(`/admin/users/${user.id}/moderation`, {
+                                                                    verification_status: verificationStatus,
+                                                                })
+                                                            }
+                                                            className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${
+                                                                (user.freelancerProfile?.verification_status ??
+                                                                    user.clientProfile?.verification_status ??
+                                                                    'pending') === verificationStatus
+                                                                    ? 'bg-orange-600 text-white'
+                                                                    : 'bg-orange-50 text-orange-700'
+                                                            }`}
+                                                        >
+                                                            {verificationStatus}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : null}
                                 </div>
                             </div>
                         </div>

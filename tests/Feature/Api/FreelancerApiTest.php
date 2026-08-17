@@ -4,6 +4,7 @@ use App\Models\Campaign;
 use App\Models\CampaignPricing;
 use App\Models\ClientProfile;
 use App\Models\FreelancerProfile;
+use App\Models\EmailVerificationOtp;
 use App\Models\Notification;
 use App\Models\SubmissionProof;
 use App\Models\TaskAssignment;
@@ -11,13 +12,18 @@ use App\Models\TaskSubmission;
 use App\Models\TaskTypePricing;
 use App\Models\User;
 use App\Models\Wallet;
+use App\Services\GoogleIdentityService;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Laravel\Sanctum\Sanctum;
+use App\Mail\EmailVerificationOtpMail;
 
 it('registers a freelancer with profile and location metadata', function () {
+    Mail::fake();
+
     $response = $this
         ->withHeaders(['CF-IPCountry' => 'NG'])
         ->postJson('/api/auth/register', [
@@ -36,6 +42,117 @@ it('registers a freelancer with profile and location metadata', function () {
     $user = User::query()->where('email', 'ada@example.com')->firstOrFail();
 
     expect($user->registration_country)->toBe('NG');
+    expect(FreelancerProfile::query()->where('user_id', $user->id)->exists())->toBeTrue();
+    expect(EmailVerificationOtp::query()->where('user_id', $user->id)->exists())->toBeTrue();
+    Mail::assertSent(EmailVerificationOtpMail::class);
+});
+
+it('resends verification otp and blocks unverified freelancers from protected platform routes', function () {
+    Mail::fake();
+
+    $freelancer = User::factory()->unverified()->create([
+        'role' => 'freelancer',
+        'status' => 'active',
+    ]);
+
+    FreelancerProfile::query()->create(['user_id' => $freelancer->id]);
+
+    Sanctum::actingAs($freelancer);
+
+    $this->postJson('/api/auth/email/verification-notification')
+        ->assertOk()
+        ->assertJsonPath('message', 'Verification code sent successfully.');
+
+    Mail::assertSent(EmailVerificationOtpMail::class);
+
+    $this->getJson('/api/freelancer/dashboard')
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Please verify your email address before using the platform.');
+});
+
+it('verifies a freelancer email with otp', function () {
+    $freelancer = User::factory()->unverified()->create([
+        'role' => 'freelancer',
+        'status' => 'active',
+    ]);
+
+    FreelancerProfile::query()->create(['user_id' => $freelancer->id]);
+
+    EmailVerificationOtp::query()->create([
+        'user_id' => $freelancer->id,
+        'code_hash' => bcrypt('123456'),
+        'attempts' => 0,
+        'expires_at' => now()->addMinutes(10),
+        'sent_at' => now(),
+    ]);
+
+    Sanctum::actingAs($freelancer);
+
+    $this->postJson('/api/auth/email/verify-otp', [
+        'otp' => '123456',
+    ])->assertOk()->assertJsonPath('message', 'Email verified successfully.');
+
+    expect($freelancer->fresh()->hasVerifiedEmail())->toBeTrue();
+    expect(EmailVerificationOtp::query()->where('user_id', $freelancer->id)->exists())->toBeFalse();
+});
+
+it('blocks suspended freelancer accounts from login and registration reuse', function () {
+    $suspended = User::factory()->create([
+        'role' => 'freelancer',
+        'status' => 'suspended',
+        'email' => 'blocked-freelancer@example.com',
+        'registration_ip' => '203.0.113.20',
+        'last_login_ip' => '203.0.113.20',
+    ]);
+
+    FreelancerProfile::query()->create(['user_id' => $suspended->id]);
+
+    $this->postJson('/api/auth/login', [
+        'email' => 'blocked-freelancer@example.com',
+        'password' => 'password',
+    ])->assertUnprocessable()->assertJsonValidationErrors(['email']);
+
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.20'])
+        ->postJson('/api/auth/register', [
+            'name' => 'Blocked Attempt',
+            'email' => 'new-freelancer@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+            'role' => 'freelancer',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['email']);
+});
+
+it('logs a freelancer in with google and auto-verifies the email', function () {
+    app()->instance(GoogleIdentityService::class, new class extends GoogleIdentityService
+    {
+        public function verify(string $idToken): array
+        {
+            expect($idToken)->toBe('google-token');
+
+            return [
+                'sub' => 'google-freelancer-123',
+                'email' => 'google.freelancer@example.com',
+                'email_verified' => true,
+                'name' => 'Google Freelancer',
+            ];
+        }
+    });
+
+    $response = $this->postJson('/api/auth/google', [
+        'id_token' => 'google-token',
+        'role' => 'freelancer',
+        'device_name' => 'android-test',
+    ]);
+
+    $response
+        ->assertOk()
+        ->assertJsonPath('user.role', 'freelancer')
+        ->assertJsonPath('user.email', 'google.freelancer@example.com');
+
+    $user = User::query()->where('email', 'google.freelancer@example.com')->firstOrFail();
+
+    expect($user->google_id)->toBe('google-freelancer-123');
+    expect($user->hasVerifiedEmail())->toBeTrue();
     expect(FreelancerProfile::query()->where('user_id', $user->id)->exists())->toBeTrue();
 });
 
@@ -255,6 +372,91 @@ it('returns approved assignment status and credited wallet balance to the freela
         ->assertJsonPath('wallets.0.wallet_type', 'freelancer_main')
         ->assertJsonPath('wallets.0.current_balance', '125.00')
         ->assertJsonPath('wallets.0.withdrawable_balance', '125.00');
+});
+
+it('blocks freelancer account deletion while review-sensitive work is still pending', function () {
+    $freelancer = User::factory()->create([
+        'role' => 'freelancer',
+        'email' => 'busy-freelancer@example.com',
+    ]);
+
+    FreelancerProfile::query()->create(['user_id' => $freelancer->id]);
+
+    $client = User::factory()->create(['role' => 'client']);
+    ClientProfile::query()->create(['user_id' => $client->id]);
+
+    $campaign = Campaign::query()->create([
+        'client_id' => $client->id,
+        'title' => 'Pending freelancer deletion blocker',
+        'task_type' => 'like',
+        'target_url' => 'https://example.com/task',
+        'target_quantity' => 1,
+        'status' => 'active',
+    ]);
+
+    TaskAssignment::query()->create([
+        'campaign_id' => $campaign->id,
+        'freelancer_id' => $freelancer->id,
+        'assignment_code' => 'BLOCK-DEL-1',
+        'status' => 'in_progress',
+        'assigned_at' => now(),
+        'started_at' => now(),
+    ]);
+
+    Sanctum::actingAs($freelancer);
+
+    $this->deleteJson('/api/auth/account')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['account']);
+});
+
+it('deletes a freelancer account safely and frees the original email for reuse', function () {
+    $freelancer = User::factory()->create([
+        'role' => 'freelancer',
+        'email' => 'delete-freelancer@example.com',
+        'phone' => '08012345678',
+    ]);
+
+    FreelancerProfile::query()->create([
+        'user_id' => $freelancer->id,
+        'phone' => '08012345678',
+        'bank_name' => 'Wema Bank',
+        'account_name' => 'Delete Me',
+        'account_number' => '0123456789',
+    ]);
+
+    Wallet::query()->create([
+        'user_id' => $freelancer->id,
+        'wallet_type' => 'freelancer_main',
+        'currency' => 'NGN',
+        'current_balance' => 0,
+        'pending_balance' => 0,
+        'withdrawable_balance' => 0,
+    ]);
+
+    Sanctum::actingAs($freelancer);
+
+    $this->deleteJson('/api/auth/account')
+        ->assertOk()
+        ->assertJsonPath('message', 'Your account has been deleted successfully.');
+
+    $deletedUser = User::withTrashed()->findOrFail($freelancer->id);
+
+    expect($deletedUser->deleted_at)->not->toBeNull();
+    expect($deletedUser->status)->toBe('deleted');
+    expect($deletedUser->email)->not->toBe('delete-freelancer@example.com');
+    expect($deletedUser->email)->toContain('deleted-user-'.$freelancer->id);
+    expect($deletedUser->freelancerProfile?->bank_name)->toBeNull();
+    expect($deletedUser->freelancerProfile?->account_name)->toBeNull();
+    expect($deletedUser->freelancerProfile?->account_number)->toBeNull();
+
+    $this->postJson('/api/auth/register', [
+        'name' => 'Return Freelancer',
+        'email' => 'delete-freelancer@example.com',
+        'password' => 'password',
+        'password_confirmation' => 'password',
+        'role' => 'freelancer',
+    ])->assertCreated();
 });
 
 it('returns active task types from the database on the freelancer dashboard', function () {

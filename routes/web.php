@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\AdminFinanceController;
 use App\Http\Controllers\Admin\AdminNotificationController;
 use App\Http\Controllers\Admin\AdminReviewController;
 use App\Http\Controllers\Admin\AdminUserController;
+use App\Http\Controllers\PaymentCallbackController;
 use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 
@@ -15,11 +16,17 @@ Route::inertia('/', 'welcome', [
 
 Route::redirect('admin/login', 'login')->name('admin.login');
 
+Route::get('payments/paystack/callback', [PaymentCallbackController::class, 'paystack'])->name('payments.paystack.callback');
+Route::get('payments/flutterwave/callback', [PaymentCallbackController::class, 'flutterwave'])->name('payments.flutterwave.callback');
+Route::get('payments/stripe/callback', [PaymentCallbackController::class, 'stripe'])->name('payments.stripe.callback');
+Route::get('payments/{provider}/cancel', [PaymentCallbackController::class, 'cancel'])->name('payments.cancel');
+
 Route::middleware(['auth', 'verified', 'admin'])->group(function () {
     Route::get('dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
 
     Route::prefix('admin')->name('admin.')->group(function (): void {
         Route::get('users', [AdminUserController::class, 'index'])->name('users.index');
+        Route::patch('users/{user}/moderation', [AdminUserController::class, 'updateModeration'])->name('users.moderation.update');
 
         Route::get('campaigns', [AdminCampaignController::class, 'index'])->name('campaigns.index');
         Route::patch('campaigns/task-type-pricing/defaults', [AdminCampaignController::class, 'updateTaskTypePricing'])->name('campaigns.task-type-pricing.update');

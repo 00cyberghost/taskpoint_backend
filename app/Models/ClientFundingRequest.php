@@ -14,10 +14,14 @@ class ClientFundingRequest extends Model
         'client_id',
         'amount',
         'payment_method',
+        'provider_reference',
+        'checkout_url',
+        'provider_payload',
         'status',
         'note',
         'submitted_at',
         'reviewed_at',
+        'paid_at',
         'reviewed_by',
     ];
 
@@ -25,8 +29,10 @@ class ClientFundingRequest extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'provider_payload' => 'array',
             'submitted_at' => 'datetime',
             'reviewed_at' => 'datetime',
+            'paid_at' => 'datetime',
         ];
     }
 

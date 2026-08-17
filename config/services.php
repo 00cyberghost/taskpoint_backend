@@ -43,4 +43,20 @@ return [
         'endpoint' => env('FIREBASE_ENDPOINT', 'https://fcm.googleapis.com/v1/projects/{project_id}/messages:send'),
     ],
 
+    'google' => [
+        'web_client_id' => env('GOOGLE_WEB_CLIENT_ID'),
+        'web_client_secret' => env('GOOGLE_WEB_CLIENT_SECRET'),
+        'freelancer_android_client_id' => env('GOOGLE_FREELANCER_ANDROID_CLIENT_ID'),
+        'freelancer_ios_client_id' => env('GOOGLE_FREELANCER_IOS_CLIENT_ID'),
+        'client_android_client_id' => env('GOOGLE_CLIENT_ANDROID_CLIENT_ID'),
+        'client_ios_client_id' => env('GOOGLE_CLIENT_IOS_CLIENT_ID'),
+        'client_ids' => array_values(array_filter([
+            env('GOOGLE_WEB_CLIENT_ID'),
+            env('GOOGLE_FREELANCER_ANDROID_CLIENT_ID'),
+            env('GOOGLE_FREELANCER_IOS_CLIENT_ID'),
+            env('GOOGLE_CLIENT_ANDROID_CLIENT_ID'),
+            env('GOOGLE_CLIENT_IOS_CLIENT_ID'),
+        ])),
+    ],
+
 ];

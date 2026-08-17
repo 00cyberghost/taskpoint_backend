@@ -48,11 +48,36 @@ class AdminFinanceController extends Controller
     public function updatePaymentSetting(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'active_method' => ['required', 'string', 'in:manual,automatic'],
+            'manual_enabled' => ['required', 'boolean'],
+            'stripe_enabled' => ['required', 'boolean'],
+            'paystack_enabled' => ['required', 'boolean'],
+            'flutterwave_enabled' => ['required', 'boolean'],
             'manual_bank_name' => ['nullable', 'string', 'max:255'],
             'manual_account_name' => ['nullable', 'string', 'max:255'],
             'manual_account_number' => ['nullable', 'string', 'max:50'],
+            'stripe_public_key' => ['nullable', 'string', 'max:255'],
+            'stripe_secret_key' => ['nullable', 'string', 'max:255'],
+            'paystack_public_key' => ['nullable', 'string', 'max:255'],
+            'paystack_secret_key' => ['nullable', 'string', 'max:255'],
+            'flutterwave_public_key' => ['nullable', 'string', 'max:255'],
+            'flutterwave_secret_key' => ['nullable', 'string', 'max:255'],
         ]);
+
+        $enabledMethods = collect([
+            'manual' => (bool) $validated['manual_enabled'],
+            'stripe' => (bool) $validated['stripe_enabled'],
+            'paystack' => (bool) $validated['paystack_enabled'],
+            'flutterwave' => (bool) $validated['flutterwave_enabled'],
+        ])->filter()->keys()->values();
+
+        if ($enabledMethods->isEmpty()) {
+            throw ValidationException::withMessages([
+                'manual_enabled' => ['At least one payment method must remain enabled.'],
+            ]);
+        }
+
+        $validated['active_method'] = $enabledMethods->contains('manual') ? 'manual' : 'automatic';
+        $validated['automatic_methods'] = $enabledMethods->reject(fn (string $method) => $method === 'manual')->values()->all();
 
         PlatformPaymentSetting::query()->updateOrCreate(
             ['id' => PlatformPaymentSetting::query()->value('id') ?? 1],

@@ -14,15 +14,19 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function (): void {
     Route::post('register', [AuthController::class, 'register']);
     Route::post('login', [AuthController::class, 'login']);
+    Route::post('google', [AuthController::class, 'google']);
     Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('me', [AuthController::class, 'me']);
         Route::post('logout', [AuthController::class, 'logout']);
+        Route::post('email/verification-notification', [AuthController::class, 'resendVerificationEmail']);
+        Route::post('email/verify-otp', [AuthController::class, 'verifyEmailOtp']);
+        Route::delete('account', [AuthController::class, 'deleteAccount']);
     });
 });
 
-Route::middleware('auth:sanctum')->prefix('freelancer')->group(function (): void {
+Route::middleware(['auth:sanctum', 'mobile.access'])->prefix('freelancer')->group(function (): void {
     Route::get('dashboard', [FreelancerAssignmentController::class, 'dashboard']);
     Route::get('tasks', [FreelancerAssignmentController::class, 'index']);
     Route::get('tasks/{assignment}', [FreelancerAssignmentController::class, 'show']);
@@ -39,7 +43,7 @@ Route::middleware('auth:sanctum')->prefix('freelancer')->group(function (): void
     Route::post('push-tokens', [FreelancerNotificationController::class, 'registerPushToken']);
 });
 
-Route::middleware('auth:sanctum')->prefix('client')->group(function (): void {
+Route::middleware(['auth:sanctum', 'mobile.access'])->prefix('client')->group(function (): void {
     Route::get('dashboard', [ClientCampaignController::class, 'dashboard']);
     Route::get('campaigns', [ClientCampaignController::class, 'index']);
     Route::post('campaigns', [ClientCampaignController::class, 'store']);

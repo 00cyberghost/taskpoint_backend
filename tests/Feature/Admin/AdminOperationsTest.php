@@ -278,3 +278,29 @@ it('allows admin to send notifications with an optional image attachment', funct
     expect($notification->image_path)->not->toBeNull();
     Storage::disk('public')->assertExists($notification->image_path);
 });
+
+it('allows admin to moderate user status and profile verification', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $freelancer = User::factory()->create([
+        'role' => 'freelancer',
+        'status' => 'active',
+    ]);
+
+    FreelancerProfile::query()->create([
+        'user_id' => $freelancer->id,
+        'verification_status' => 'pending',
+    ]);
+
+    $freelancer->createToken('moderation-test');
+
+    $this->actingAs($admin)
+        ->patch("/admin/users/{$freelancer->id}/moderation", [
+            'status' => 'suspended',
+            'verification_status' => 'verified',
+        ])
+        ->assertRedirect();
+
+    expect($freelancer->fresh()->status)->toBe('suspended');
+    expect($freelancer->fresh()->tokens()->count())->toBe(0);
+    expect($freelancer->freelancerProfile->fresh()->verification_status)->toBe('verified');
+});
