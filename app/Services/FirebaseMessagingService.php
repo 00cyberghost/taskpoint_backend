@@ -71,6 +71,13 @@ class FirebaseMessagingService
         $failureCount = 0;
 
         foreach ($tokens as $token) {
+            $data = $this->normalizeDataPayload(array_filter([
+                'notification_id' => $notification->id,
+                'type' => $notification->type,
+                'image_url' => $notification->image_url,
+                ...($notification->data_json ?? []),
+            ], static fn ($value) => $value !== null));
+
             $response = Http::withToken($accessToken)
                 ->acceptJson()
                 ->post($endpoint, [
@@ -81,12 +88,7 @@ class FirebaseMessagingService
                             'body' => $notification->body,
                             'image' => $notification->image_url,
                         ]),
-                        'data' => array_filter([
-                            'notification_id' => (string) $notification->id,
-                            'type' => $notification->type,
-                            'image_url' => $notification->image_url,
-                            ...($notification->data_json ?? []),
-                        ], static fn ($value) => $value !== null),
+                        'data' => $data,
                     ],
                 ]);
 
@@ -185,5 +187,32 @@ class FirebaseMessagingService
     private function base64UrlEncode(string $value): string
     {
         return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+
+    /**
+     * FCM HTTP v1 requires every entry in message.data to be a string.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, string>
+     */
+    private function normalizeDataPayload(array $payload): array
+    {
+        $normalized = [];
+
+        foreach ($payload as $key => $value) {
+            if (is_bool($value)) {
+                $normalized[$key] = $value ? 'true' : 'false';
+                continue;
+            }
+
+            if (is_scalar($value)) {
+                $normalized[$key] = (string) $value;
+                continue;
+            }
+
+            $normalized[$key] = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        }
+
+        return $normalized;
     }
 }
