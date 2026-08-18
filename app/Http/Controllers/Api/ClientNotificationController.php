@@ -9,6 +9,7 @@ use App\Models\PushToken;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class ClientNotificationController extends Controller
 {
@@ -25,6 +26,15 @@ class ClientNotificationController extends Controller
     public function markAsRead(Request $request, Notification $notification): JsonResponse
     {
         $client = $this->client($request);
+
+        Log::info('Client notification read attempt.', [
+            'notification_id' => $notification->id,
+            'notification_user_id' => $notification->user_id,
+            'notification_type' => $notification->type,
+            'request_user_id' => $client->id,
+            'request_user_role' => $client->role,
+        ]);
+
         abort_unless($notification->user_id === $client->id, 403);
 
         $notification->update([
