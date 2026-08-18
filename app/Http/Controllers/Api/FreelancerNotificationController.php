@@ -8,7 +8,6 @@ use App\Models\Notification;
 use App\Models\PushToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 
 class FreelancerNotificationController extends Controller
 {
@@ -24,15 +23,7 @@ class FreelancerNotificationController extends Controller
 
     public function markAsRead(Request $request, Notification $notification): JsonResponse
     {
-        Log::info('Freelancer notification read attempt.', [
-            'notification_id' => $notification->id,
-            'notification_user_id' => $notification->user_id,
-            'notification_type' => $notification->type,
-            'request_user_id' => $request->user()?->id,
-            'request_user_role' => $request->user()?->role,
-        ]);
-
-        abort_unless($notification->user_id === $request->user()->id, 403);
+        abort_unless((int) $notification->user_id === (int) $request->user()->id, 403);
 
         $notification->update([
             'read_at' => now(),
