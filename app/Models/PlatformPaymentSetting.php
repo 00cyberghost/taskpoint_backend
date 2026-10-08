@@ -15,6 +15,7 @@ class PlatformPaymentSetting extends Model
         'stripe_enabled',
         'paystack_enabled',
         'flutterwave_enabled',
+        'monnify_enabled',
         'manual_bank_name',
         'manual_account_name',
         'manual_account_number',
@@ -25,6 +26,13 @@ class PlatformPaymentSetting extends Model
         'paystack_secret_key',
         'flutterwave_public_key',
         'flutterwave_secret_key',
+        'monnify_api_key',
+        'monnify_secret_key',
+        'monnify_contract_code',
+        'monnify_environment',
+        'default_payout_method',
+        'monnify_disbursement_account_number',
+        'flutterwave_webhook_secret',
     ];
 
     protected function casts(): array
@@ -35,6 +43,7 @@ class PlatformPaymentSetting extends Model
             'stripe_enabled' => 'boolean',
             'paystack_enabled' => 'boolean',
             'flutterwave_enabled' => 'boolean',
+            'monnify_enabled' => 'boolean',
         ];
     }
 
@@ -59,6 +68,10 @@ class PlatformPaymentSetting extends Model
 
         if ($this->flutterwave_enabled) {
             $methods[] = 'flutterwave';
+        }
+
+        if ($this->monnify_enabled) {
+            $methods[] = 'monnify';
         }
 
         return $methods;

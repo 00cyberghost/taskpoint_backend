@@ -6,6 +6,7 @@ use App\Models\ClientFundingRequest;
 use App\Models\ClientProfile;
 use App\Models\FreelancerProfile;
 use App\Models\Notification;
+use App\Models\PlatformPaymentSetting;
 use App\Models\TaskAssignment;
 use App\Models\TaskSubmission;
 use App\Models\User;
@@ -13,6 +14,7 @@ use App\Models\Wallet;
 use App\Models\WalletTransaction;
 use App\Models\WithdrawalRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
 it('prevents approving the same submission twice', function () {
@@ -113,6 +115,121 @@ it('settles wallet balances when a withdrawal is marked paid', function () {
         ->toBeTrue();
     expect(Notification::query()->where('user_id', $freelancer->id)->where('type', 'withdrawal_paid')->exists())
         ->toBeTrue();
+});
+
+it('pays a withdrawal through the configured Paystack gateway', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $freelancer = User::factory()->create(['role' => 'freelancer']);
+
+    FreelancerProfile::query()->create([
+        'user_id' => $freelancer->id,
+        'bank_name' => 'GTBank',
+        'bank_code' => '058',
+        'account_name' => 'Ada Worker',
+        'account_number' => '0123456789',
+    ]);
+
+    $wallet = Wallet::query()->create([
+        'user_id' => $freelancer->id,
+        'wallet_type' => 'freelancer_main',
+        'currency' => 'NGN',
+        'current_balance' => 2500,
+        'pending_balance' => 0,
+        'withdrawable_balance' => 2500,
+    ]);
+
+    PlatformPaymentSetting::query()->create([
+        'manual_enabled' => true,
+        'paystack_enabled' => true,
+        'default_payout_method' => 'paystack',
+        'paystack_secret_key' => 'sk_test_example',
+    ]);
+
+    $withdrawal = WithdrawalRequest::query()->create([
+        'freelancer_id' => $freelancer->id,
+        'amount' => 1000,
+        'destination_type' => 'bank',
+        'destination_details' => [
+            'bank_name' => 'GTBank',
+            'bank_code' => '058',
+            'account_name' => 'Ada Worker',
+            'account_number' => '0123456789',
+        ],
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+
+    Http::fake([
+        'https://api.paystack.co/transferrecipient' => Http::response([
+            'status' => true,
+            'data' => ['recipient_code' => 'RCP_test'],
+        ]),
+        'https://api.paystack.co/transfer' => Http::response([
+            'status' => true,
+            'data' => ['status' => 'success'],
+        ]),
+    ]);
+
+    $this->actingAs($admin)
+        ->patch("/admin/finance/withdrawals/{$withdrawal->id}", ['status' => 'paid'])
+        ->assertRedirect();
+
+    expect($wallet->fresh()->current_balance)->toBe('1500.00');
+    expect($wallet->fresh()->withdrawable_balance)->toBe('1500.00');
+    expect($withdrawal->fresh()->status)->toBe('paid');
+    expect(WalletTransaction::query()->where('transaction_type', 'withdrawal_payout')->where('reference_id', $withdrawal->id)->exists())
+        ->toBeTrue();
+});
+
+it('releases reserved funds when an automated payout fails', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $freelancer = User::factory()->create(['role' => 'freelancer']);
+
+    FreelancerProfile::query()->create(['user_id' => $freelancer->id]);
+    $wallet = Wallet::query()->create([
+        'user_id' => $freelancer->id,
+        'wallet_type' => 'freelancer_main',
+        'currency' => 'NGN',
+        'current_balance' => 2500,
+        'pending_balance' => 0,
+        'withdrawable_balance' => 2500,
+    ]);
+
+    PlatformPaymentSetting::query()->create([
+        'manual_enabled' => true,
+        'paystack_enabled' => true,
+        'default_payout_method' => 'paystack',
+        'paystack_secret_key' => 'sk_test_example',
+    ]);
+
+    $withdrawal = WithdrawalRequest::query()->create([
+        'freelancer_id' => $freelancer->id,
+        'amount' => 1000,
+        'destination_type' => 'bank',
+        'destination_details' => [
+            'bank_code' => '058',
+            'account_name' => 'Ada Worker',
+            'account_number' => '0123456789',
+            'bank_name' => 'GTBank',
+        ],
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+
+    Http::fake([
+        'https://api.paystack.co/transferrecipient' => Http::response([
+            'status' => false,
+            'message' => 'Invalid account',
+        ], 400),
+    ]);
+
+    $this->actingAs($admin)
+        ->patch("/admin/finance/withdrawals/{$withdrawal->id}", ['status' => 'paid'])
+        ->assertSessionHasErrors('status');
+
+    expect($wallet->fresh()->current_balance)->toBe('2500.00');
+    expect($wallet->fresh()->withdrawable_balance)->toBe('2500.00');
+    expect($withdrawal->fresh()->status)->toBe('rejected');
 });
 
 it('renders the admin notifications page', function () {

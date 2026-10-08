@@ -68,11 +68,19 @@ class FreelancerFinanceController extends Controller
             ]);
         }
 
+        $profile = $request->user()->freelancerProfile;
+        $destinationDetails = array_merge([
+            'bank_name' => $profile?->bank_name,
+            'bank_code' => $profile?->bank_code,
+            'account_name' => $profile?->account_name,
+            'account_number' => $profile?->account_number,
+        ], $validated['destination_details']);
+
         $withdrawal = WithdrawalRequest::query()->create([
             'freelancer_id' => $request->user()->id,
             'amount' => $validated['amount'],
             'destination_type' => $validated['destination_type'],
-            'destination_details' => $validated['destination_details'],
+            'destination_details' => $destinationDetails,
             'status' => 'requested',
             'requested_at' => now(),
         ]);
@@ -98,6 +106,7 @@ class FreelancerFinanceController extends Controller
     {
         $validated = $request->validate([
             'bank_name' => ['required', 'string', 'max:255'],
+            'bank_code' => ['nullable', 'string', 'max:20'],
             'account_name' => ['required', 'string', 'max:255'],
             'account_number' => ['required', 'string', 'max:50'],
         ]);
@@ -109,6 +118,7 @@ class FreelancerFinanceController extends Controller
 
         $profile->update([
             'bank_name' => $validated['bank_name'],
+            'bank_code' => $validated['bank_code'] ?? null,
             'account_name' => $validated['account_name'],
             'account_number' => $validated['account_number'],
             'payout_status' => 'pending_review',

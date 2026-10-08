@@ -1,6 +1,7 @@
 import { Head, router } from '@inertiajs/react';
 import { CreditCard, Landmark, Wallet } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
 import type { BreadcrumbItem } from '@/types';
@@ -11,6 +12,15 @@ type WithdrawalItem = {
     destination_type: string;
     status: string;
     requested_at: string | null;
+    destination_details: {
+        bank_name?: string;
+        bank_code?: string;
+        account_name?: string;
+        account_number?: string;
+    } | null;
+    payout_method?: string | null;
+    provider_reference?: string | null;
+    failure_reason?: string | null;
     freelancer: { name: string; email: string } | null;
 };
 
@@ -40,6 +50,7 @@ type PaymentSetting = {
     stripe_enabled?: boolean;
     paystack_enabled?: boolean;
     flutterwave_enabled?: boolean;
+    monnify_enabled?: boolean;
     manual_bank_name: string | null;
     manual_account_name: string | null;
     manual_account_number: string | null;
@@ -49,6 +60,13 @@ type PaymentSetting = {
     paystack_secret_key?: string | null;
     flutterwave_public_key?: string | null;
     flutterwave_secret_key?: string | null;
+    monnify_api_key?: string | null;
+    monnify_secret_key?: string | null;
+    monnify_contract_code?: string | null;
+    monnify_environment?: 'sandbox' | 'live' | null;
+    default_payout_method?: 'manual' | 'paystack' | 'flutterwave' | 'monnify' | null;
+    monnify_disbursement_account_number?: string | null;
+    flutterwave_webhook_secret?: string | null;
 } | null;
 
 type Props = {
@@ -65,20 +83,76 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Finance', href: '/admin/finance' },
 ];
 
-export default function AdminFinance({ paymentSetting, withdrawals, fundingRequests, transactions }: Props) {
-    const [manualEnabled, setManualEnabled] = useState(paymentSetting?.manual_enabled ?? true);
-    const [stripeEnabled, setStripeEnabled] = useState(paymentSetting?.stripe_enabled ?? false);
-    const [paystackEnabled, setPaystackEnabled] = useState(paymentSetting?.paystack_enabled ?? false);
-    const [flutterwaveEnabled, setFlutterwaveEnabled] = useState(paymentSetting?.flutterwave_enabled ?? false);
-    const [bankName, setBankName] = useState(paymentSetting?.manual_bank_name ?? '');
-    const [accountName, setAccountName] = useState(paymentSetting?.manual_account_name ?? '');
-    const [accountNumber, setAccountNumber] = useState(paymentSetting?.manual_account_number ?? '');
-    const [stripePublicKey, setStripePublicKey] = useState(paymentSetting?.stripe_public_key ?? '');
-    const [stripeSecretKey, setStripeSecretKey] = useState(paymentSetting?.stripe_secret_key ?? '');
-    const [paystackPublicKey, setPaystackPublicKey] = useState(paymentSetting?.paystack_public_key ?? '');
-    const [paystackSecretKey, setPaystackSecretKey] = useState(paymentSetting?.paystack_secret_key ?? '');
-    const [flutterwavePublicKey, setFlutterwavePublicKey] = useState(paymentSetting?.flutterwave_public_key ?? '');
-    const [flutterwaveSecretKey, setFlutterwaveSecretKey] = useState(paymentSetting?.flutterwave_secret_key ?? '');
+export default function AdminFinance({
+    paymentSetting,
+    withdrawals,
+    fundingRequests,
+    transactions,
+}: Props) {
+    const [manualEnabled, setManualEnabled] = useState(
+        paymentSetting?.manual_enabled ?? true,
+    );
+    const [stripeEnabled, setStripeEnabled] = useState(
+        paymentSetting?.stripe_enabled ?? false,
+    );
+    const [paystackEnabled, setPaystackEnabled] = useState(
+        paymentSetting?.paystack_enabled ?? false,
+    );
+    const [flutterwaveEnabled, setFlutterwaveEnabled] = useState(
+        paymentSetting?.flutterwave_enabled ?? false,
+    );
+    const [monnifyEnabled, setMonnifyEnabled] = useState(
+        paymentSetting?.monnify_enabled ?? false,
+    );
+    const [bankName, setBankName] = useState(
+        paymentSetting?.manual_bank_name ?? '',
+    );
+    const [accountName, setAccountName] = useState(
+        paymentSetting?.manual_account_name ?? '',
+    );
+    const [accountNumber, setAccountNumber] = useState(
+        paymentSetting?.manual_account_number ?? '',
+    );
+    const [stripePublicKey, setStripePublicKey] = useState(
+        paymentSetting?.stripe_public_key ?? '',
+    );
+    const [stripeSecretKey, setStripeSecretKey] = useState(
+        paymentSetting?.stripe_secret_key ?? '',
+    );
+    const [paystackPublicKey, setPaystackPublicKey] = useState(
+        paymentSetting?.paystack_public_key ?? '',
+    );
+    const [paystackSecretKey, setPaystackSecretKey] = useState(
+        paymentSetting?.paystack_secret_key ?? '',
+    );
+    const [flutterwavePublicKey, setFlutterwavePublicKey] = useState(
+        paymentSetting?.flutterwave_public_key ?? '',
+    );
+    const [flutterwaveSecretKey, setFlutterwaveSecretKey] = useState(
+        paymentSetting?.flutterwave_secret_key ?? '',
+    );
+    const [monnifyApiKey, setMonnifyApiKey] = useState(
+        paymentSetting?.monnify_api_key ?? '',
+    );
+    const [monnifySecretKey, setMonnifySecretKey] = useState(
+        paymentSetting?.monnify_secret_key ?? '',
+    );
+    const [monnifyContractCode, setMonnifyContractCode] = useState(
+        paymentSetting?.monnify_contract_code ?? '',
+    );
+    const [monnifyEnvironment, setMonnifyEnvironment] = useState<
+        'sandbox' | 'live'
+    >(paymentSetting?.monnify_environment === 'live' ? 'live' : 'sandbox');
+    const [defaultPayoutMethod, setDefaultPayoutMethod] = useState<
+        'manual' | 'paystack' | 'flutterwave' | 'monnify'
+    >(paymentSetting?.default_payout_method ?? 'manual');
+    const [monnifyDisbursementAccountNumber, setMonnifyDisbursementAccountNumber] = useState(
+        paymentSetting?.monnify_disbursement_account_number ?? '',
+    );
+    const [flutterwaveWebhookSecret, setFlutterwaveWebhookSecret] = useState(
+        paymentSetting?.flutterwave_webhook_secret ?? '',
+    );
+    const [saving, setSaving] = useState(false);
 
     const enabledMethods = useMemo(() => {
         return [
@@ -86,10 +160,19 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
             stripeEnabled ? 'Stripe' : null,
             paystackEnabled ? 'Paystack' : null,
             flutterwaveEnabled ? 'Flutterwave' : null,
+            monnifyEnabled ? 'Monnify' : null,
         ].filter(Boolean);
-    }, [flutterwaveEnabled, manualEnabled, paystackEnabled, stripeEnabled]);
+    }, [
+        flutterwaveEnabled,
+        manualEnabled,
+        monnifyEnabled,
+        paystackEnabled,
+        stripeEnabled,
+    ]);
 
     function savePaymentSetting() {
+        setSaving(true);
+
         router.patch(
             '/admin/finance/payment-setting',
             {
@@ -97,6 +180,7 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                 stripe_enabled: stripeEnabled,
                 paystack_enabled: paystackEnabled,
                 flutterwave_enabled: flutterwaveEnabled,
+                monnify_enabled: monnifyEnabled,
                 manual_bank_name: bankName,
                 manual_account_name: accountName,
                 manual_account_number: accountNumber,
@@ -106,8 +190,18 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                 paystack_secret_key: paystackSecretKey,
                 flutterwave_public_key: flutterwavePublicKey,
                 flutterwave_secret_key: flutterwaveSecretKey,
+                monnify_api_key: monnifyApiKey,
+                monnify_secret_key: monnifySecretKey,
+                monnify_contract_code: monnifyContractCode,
+                monnify_environment: monnifyEnvironment,
+                default_payout_method: defaultPayoutMethod,
+                monnify_disbursement_account_number: monnifyDisbursementAccountNumber,
+                flutterwave_webhook_secret: flutterwaveWebhookSecret,
             },
-            { preserveScroll: true },
+            {
+                preserveScroll: true,
+                onFinish: () => setSaving(false),
+            },
         );
     }
 
@@ -122,13 +216,42 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                             <Wallet className="size-6" />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-semibold text-stone-900">Finance & Payout Operations</h1>
+                            <h1 className="text-2xl font-semibold text-stone-900">
+                                Finance & Payout Operations
+                            </h1>
                             <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">
-                                Configure manual and automatic funding options, approve manual wallet top-ups, and manage payouts.
+                                Configure manual and automatic funding options,
+                                approve manual wallet top-ups, and manage
+                                payouts.
                             </p>
-                            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.24em] text-stone-400">
-                                Enabled now: {enabledMethods.length > 0 ? enabledMethods.join(', ') : 'None'}
+                            <p className="mt-3 text-xs font-semibold tracking-[0.24em] text-stone-400 uppercase">
+                                Enabled now:{' '}
+                                {enabledMethods.length > 0
+                                    ? enabledMethods.join(', ')
+                                    : 'None'}
                             </p>
+                            <label className="mt-5 block max-w-md">
+                                <span className="mb-2 block text-sm font-medium text-stone-700">
+                                    Default freelancer payout gateway
+                                </span>
+                                <select
+                                    value={defaultPayoutMethod}
+                                    onChange={(event) =>
+                                        setDefaultPayoutMethod(
+                                            event.target.value as typeof defaultPayoutMethod,
+                                        )
+                                    }
+                                    className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 transition outline-none focus:border-stone-400"
+                                >
+                                    <option value="manual">Manual bank transfer</option>
+                                    <option value="paystack">Paystack Transfer</option>
+                                    <option value="flutterwave">Flutterwave Transfer</option>
+                                    <option value="monnify">Monnify Transfer</option>
+                                </select>
+                                <span className="mt-2 block text-xs leading-5 text-stone-500">
+                                    Stripe remains available for client funding. Stripe payouts require Stripe Connect onboarding and are not enabled by this setting.
+                                </span>
+                            </label>
                         </div>
                     </div>
                 </section>
@@ -140,9 +263,13 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                                 <Landmark className="size-5" />
                             </div>
                             <div>
-                                <h2 className="text-lg font-semibold text-stone-900">Payment Method Setup</h2>
+                                <h2 className="text-lg font-semibold text-stone-900">
+                                    Payment Method Setup
+                                </h2>
                                 <p className="text-sm text-stone-500">
-                                    Toggle any client funding method on or off and manage each provider credential here.
+                                    Choose whether each client funding method is
+                                    enabled, then manage its provider
+                                    credentials here.
                                 </p>
                             </div>
                         </div>
@@ -154,9 +281,21 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                                 enabled={manualEnabled}
                                 onToggle={setManualEnabled}
                             >
-                                <Input label="Bank Name" value={bankName} onChange={setBankName} />
-                                <Input label="Account Name" value={accountName} onChange={setAccountName} />
-                                <Input label="Account Number" value={accountNumber} onChange={setAccountNumber} />
+                                <Input
+                                    label="Bank Name"
+                                    value={bankName}
+                                    onChange={setBankName}
+                                />
+                                <Input
+                                    label="Account Name"
+                                    value={accountName}
+                                    onChange={setAccountName}
+                                />
+                                <Input
+                                    label="Account Number"
+                                    value={accountNumber}
+                                    onChange={setAccountNumber}
+                                />
                             </GatewayCard>
 
                             <GatewayCard
@@ -165,8 +304,16 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                                 enabled={stripeEnabled}
                                 onToggle={setStripeEnabled}
                             >
-                                <Input label="Stripe Public Key" value={stripePublicKey} onChange={setStripePublicKey} />
-                                <Input label="Stripe Secret Key" value={stripeSecretKey} onChange={setStripeSecretKey} />
+                                <Input
+                                    label="Stripe Public Key"
+                                    value={stripePublicKey}
+                                    onChange={setStripePublicKey}
+                                />
+                                <Input
+                                    label="Stripe Secret Key"
+                                    value={stripeSecretKey}
+                                    onChange={setStripeSecretKey}
+                                />
                             </GatewayCard>
 
                             <GatewayCard
@@ -175,8 +322,16 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                                 enabled={paystackEnabled}
                                 onToggle={setPaystackEnabled}
                             >
-                                <Input label="Paystack Public Key" value={paystackPublicKey} onChange={setPaystackPublicKey} />
-                                <Input label="Paystack Secret Key" value={paystackSecretKey} onChange={setPaystackSecretKey} />
+                                <Input
+                                    label="Paystack Public Key"
+                                    value={paystackPublicKey}
+                                    onChange={setPaystackPublicKey}
+                                />
+                                <Input
+                                    label="Paystack Secret Key"
+                                    value={paystackSecretKey}
+                                    onChange={setPaystackSecretKey}
+                                />
                             </GatewayCard>
 
                             <GatewayCard
@@ -195,14 +350,69 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                                     value={flutterwaveSecretKey}
                                     onChange={setFlutterwaveSecretKey}
                                 />
+                                <Input
+                                    label="Flutterwave Webhook Secret Hash"
+                                    value={flutterwaveWebhookSecret}
+                                    onChange={setFlutterwaveWebhookSecret}
+                                />
+                            </GatewayCard>
+
+                            <GatewayCard
+                                title="Monnify"
+                                description="Hosted checkout for card and bank transfer funding."
+                                enabled={monnifyEnabled}
+                                onToggle={setMonnifyEnabled}
+                            >
+                                <Input
+                                    label="Monnify API Key"
+                                    value={monnifyApiKey}
+                                    onChange={setMonnifyApiKey}
+                                />
+                                <Input
+                                    label="Monnify Secret Key"
+                                    value={monnifySecretKey}
+                                    onChange={setMonnifySecretKey}
+                                />
+                                <Input
+                                    label="Contract Code"
+                                    value={monnifyContractCode}
+                                    onChange={setMonnifyContractCode}
+                                />
+                                <Input
+                                    label="Disbursement Source Account Number"
+                                    value={monnifyDisbursementAccountNumber}
+                                    onChange={setMonnifyDisbursementAccountNumber}
+                                />
+                                <label className="block">
+                                    <span className="mb-2 block text-sm font-medium text-stone-700">
+                                        Environment
+                                    </span>
+                                    <select
+                                        value={monnifyEnvironment}
+                                        onChange={(event) =>
+                                            setMonnifyEnvironment(
+                                                event.target.value as
+                                                    | 'sandbox'
+                                                    | 'live',
+                                            )
+                                        }
+                                        className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm text-stone-900 transition outline-none focus:border-stone-400"
+                                    >
+                                        <option value="sandbox">Sandbox</option>
+                                        <option value="live">Live</option>
+                                    </select>
+                                </label>
                             </GatewayCard>
 
                             <button
                                 type="button"
-                                className="w-full rounded-2xl bg-stone-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-700"
+                                disabled={saving}
+                                className="w-full rounded-2xl bg-stone-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 onClick={savePaymentSetting}
                             >
-                                Save payment settings
+                                {saving
+                                    ? 'Saving payment settings...'
+                                    : 'Save payment settings'}
                             </button>
                         </div>
                     </div>
@@ -213,32 +423,51 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                                 <CreditCard className="size-5" />
                             </div>
                             <div>
-                                <h2 className="text-lg font-semibold text-stone-900">Client Funding Requests</h2>
-                                <p className="text-sm text-stone-500">Manual transfers stay here for approval. Automatic ones self-settle after verification.</p>
+                                <h2 className="text-lg font-semibold text-stone-900">
+                                    Client Funding Requests
+                                </h2>
+                                <p className="text-sm text-stone-500">
+                                    Manual transfers stay here for approval.
+                                    Automatic ones self-settle after
+                                    verification.
+                                </p>
                             </div>
                         </div>
 
                         <div className="space-y-4">
                             {fundingRequests.map((request) => (
-                                <div key={request.id} className="rounded-2xl border border-stone-200 p-4">
+                                <div
+                                    key={request.id}
+                                    className="rounded-2xl border border-stone-200 p-4"
+                                >
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
                                             <p className="text-sm font-semibold text-stone-900">
-                                                {request.client?.name ?? 'Unknown client'}
+                                                {request.client?.name ??
+                                                    'Unknown client'}
                                             </p>
                                             <p className="mt-1 text-sm text-stone-500">
-                                                {request.client?.email ?? 'No email'} · {request.payment_method}
+                                                {request.client?.email ??
+                                                    'No email'}{' '}
+                                                · {request.payment_method}
                                             </p>
                                         </div>
-                                        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-stone-700">
+                                        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-stone-700 uppercase">
                                             {request.status}
                                         </span>
                                     </div>
 
                                     <p className="mt-4 text-xl font-semibold text-stone-900">
-                                        ₦{Number(request.amount).toLocaleString()}
+                                        ₦
+                                        {Number(
+                                            request.amount,
+                                        ).toLocaleString()}
                                     </p>
-                                    {request.note ? <p className="mt-2 text-sm text-stone-500">{request.note}</p> : null}
+                                    {request.note ? (
+                                        <p className="mt-2 text-sm text-stone-500">
+                                            {request.note}
+                                        </p>
+                                    ) : null}
 
                                     <div className="mt-4 flex gap-2">
                                         <ActionButton
@@ -271,30 +500,57 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
 
                 <section className="grid gap-6 xl:grid-cols-[1fr_1.2fr]">
                     <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
-                        <h2 className="text-lg font-semibold text-stone-900">Withdrawal Queue</h2>
+                        <h2 className="text-lg font-semibold text-stone-900">
+                            Withdrawal Queue
+                        </h2>
                         <div className="mt-5 space-y-4">
                             {withdrawals.data.map((withdrawal) => (
-                                <div key={withdrawal.id} className="rounded-2xl border border-stone-200 p-4">
+                                <div
+                                    key={withdrawal.id}
+                                    className="rounded-2xl border border-stone-200 p-4"
+                                >
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
                                             <p className="text-sm font-semibold text-stone-900">
-                                                {withdrawal.freelancer?.name ?? 'Unknown freelancer'}
+                                                {withdrawal.freelancer?.name ??
+                                                    'Unknown freelancer'}
                                             </p>
                                             <p className="mt-1 text-sm text-stone-500">
-                                                {withdrawal.freelancer?.email ?? 'No email'} · {withdrawal.destination_type}
+                                                {withdrawal.freelancer?.email ??
+                                                    'No email'}{' '}
+                                                · {withdrawal.destination_type}
+                                            </p>
+                                            <p className="mt-2 text-xs text-stone-500">
+                                                {withdrawal.destination_details?.bank_name ??
+                                                    'Bank not set'}{' '}
+                                                ·{' '}
+                                                {withdrawal.destination_details?.account_name ??
+                                                    'Account name not set'}{' '}
+                                                ·{' '}
+                                                {withdrawal.destination_details?.account_number ??
+                                                    'Account number not set'}
                                             </p>
                                         </div>
-                                        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-stone-700">
-                                            {withdrawal.status}
+                                        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-stone-700 uppercase">
+                                                {withdrawal.status === 'paid'
+                                                    ? 'paid'
+                                                    : withdrawal.status}
                                         </span>
                                     </div>
 
                                     <div className="mt-4 flex items-center justify-between">
                                         <p className="text-xl font-semibold text-stone-900">
-                                            ₦{Number(withdrawal.amount).toLocaleString()}
+                                            ₦
+                                            {Number(
+                                                withdrawal.amount,
+                                            ).toLocaleString()}
                                         </p>
                                         <div className="flex gap-2">
-                                            {['under_review', 'approved', 'paid'].map((status) => (
+                                            {[
+                                                'under_review',
+                                                'approved',
+                                                'paid',
+                                            ].map((status) => (
                                                 <button
                                                     key={status}
                                                     type="button"
@@ -303,44 +559,75 @@ export default function AdminFinance({ paymentSetting, withdrawals, fundingReque
                                                         router.patch(
                                                             `/admin/finance/withdrawals/${withdrawal.id}`,
                                                             { status },
-                                                            { preserveScroll: true },
+                                                            {
+                                                                preserveScroll: true,
+                                                            },
                                                         )
                                                     }
                                                 >
-                                                    {status}
+                                                    {status === 'paid'
+                                                        ? 'Send payout'
+                                                        : status.replace('_', ' ')}
                                                 </button>
                                             ))}
                                         </div>
                                     </div>
+                                    {withdrawal.payout_method ? (
+                                        <p className="mt-3 text-xs text-stone-500">
+                                            Gateway: {withdrawal.payout_method}
+                                            {withdrawal.provider_reference
+                                                ? ` · ${withdrawal.provider_reference}`
+                                                : ''}
+                                        </p>
+                                    ) : null}
+                                    {withdrawal.failure_reason ? (
+                                        <p className="mt-2 text-xs text-red-600">
+                                            {withdrawal.failure_reason}
+                                        </p>
+                                    ) : null}
                                 </div>
                             ))}
                         </div>
                     </div>
 
                     <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
-                        <h2 className="text-lg font-semibold text-stone-900">Recent Ledger Activity</h2>
+                        <h2 className="text-lg font-semibold text-stone-900">
+                            Recent Ledger Activity
+                        </h2>
 
                         <div className="mt-5 space-y-3">
                             {transactions.map((transaction) => (
-                                <div key={transaction.id} className="rounded-2xl border border-stone-200 p-4">
+                                <div
+                                    key={transaction.id}
+                                    className="rounded-2xl border border-stone-200 p-4"
+                                >
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
                                             <p className="text-sm font-semibold text-stone-900">
                                                 {transaction.transaction_type}
                                             </p>
                                             <p className="mt-1 text-sm text-stone-500">
-                                                {transaction.user?.name ?? 'Unknown user'} · {transaction.direction}
+                                                {transaction.user?.name ??
+                                                    'Unknown user'}{' '}
+                                                · {transaction.direction}
                                             </p>
                                         </div>
                                         <div className="text-right">
                                             <p className="text-base font-semibold text-stone-900">
-                                                ₦{Number(transaction.amount).toLocaleString()}
+                                                ₦
+                                                {Number(
+                                                    transaction.amount,
+                                                ).toLocaleString()}
                                             </p>
-                                            <p className="mt-1 text-xs text-stone-400">{transaction.status}</p>
+                                            <p className="mt-1 text-xs text-stone-400">
+                                                {transaction.status}
+                                            </p>
                                         </div>
                                     </div>
                                     {transaction.description ? (
-                                        <p className="mt-3 text-sm leading-6 text-stone-500">{transaction.description}</p>
+                                        <p className="mt-3 text-sm leading-6 text-stone-500">
+                                            {transaction.description}
+                                        </p>
                                     ) : null}
                                 </div>
                             ))}
@@ -369,18 +656,26 @@ function GatewayCard({
         <div className="rounded-3xl border border-stone-200 p-4">
             <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
-                    <h3 className="text-sm font-semibold text-stone-900">{title}</h3>
-                    <p className="mt-1 text-sm leading-6 text-stone-500">{description}</p>
+                    <h3 className="text-sm font-semibold text-stone-900">
+                        {title}
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-stone-500">
+                        {description}
+                    </p>
                 </div>
-                <button
-                    type="button"
-                    onClick={() => onToggle(!enabled)}
-                    className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide transition ${
-                        enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-200 text-stone-600'
-                    }`}
-                >
-                    {enabled ? 'Enabled' : 'Disabled'}
-                </button>
+                <label className="flex shrink-0 items-center gap-2 text-xs font-semibold text-stone-500">
+                    <span>Status</span>
+                    <select
+                        value={enabled ? 'enabled' : 'disabled'}
+                        onChange={(event) =>
+                            onToggle(event.target.value === 'enabled')
+                        }
+                        className={`rounded-xl border px-3 py-2 text-xs font-semibold transition outline-none focus:border-stone-400 ${enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-stone-200 bg-stone-100 text-stone-600'}`}
+                    >
+                        <option value="enabled">Enabled</option>
+                        <option value="disabled">Disabled</option>
+                    </select>
+                </label>
             </div>
             <div className="space-y-4">{children}</div>
         </div>
@@ -398,11 +693,13 @@ function Input({
 }) {
     return (
         <label className="block">
-            <span className="mb-2 block text-sm font-medium text-stone-700">{label}</span>
+            <span className="mb-2 block text-sm font-medium text-stone-700">
+                {label}
+            </span>
             <input
                 value={value}
                 onChange={(event) => onChange(event.target.value)}
-                className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-stone-400"
+                className="w-full rounded-2xl border border-stone-200 px-4 py-3 text-sm text-stone-900 transition outline-none focus:border-stone-400"
             />
         </label>
     );

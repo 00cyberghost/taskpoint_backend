@@ -11,8 +11,7 @@ class PaymentCallbackController extends Controller
 {
     public function __construct(
         protected PaymentGatewayService $paymentGatewayService,
-    ) {
-    }
+    ) {}
 
     public function paystack(Request $request): Response
     {
@@ -52,6 +51,20 @@ class PaymentCallbackController extends Controller
         return response($this->htmlResponse(
             $success,
             'Stripe',
+            $success ? 'Payment confirmed. Your wallet has been updated.' : 'Payment could not be confirmed yet.',
+        ));
+    }
+
+    public function monnify(Request $request): Response
+    {
+        $fundingRequest = ClientFundingRequest::query()->findOrFail((int) $request->query('funding_request'));
+        $reference = (string) $request->query('paymentReference', $fundingRequest->provider_reference);
+
+        $success = $reference !== '' && $this->paymentGatewayService->completeMonnify($fundingRequest, $reference);
+
+        return response($this->htmlResponse(
+            $success,
+            'Monnify',
             $success ? 'Payment confirmed. Your wallet has been updated.' : 'Payment could not be confirmed yet.',
         ));
     }

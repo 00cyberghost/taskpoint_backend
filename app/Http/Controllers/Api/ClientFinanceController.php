@@ -18,9 +18,7 @@ class ClientFinanceController extends Controller
     public function __construct(
         private readonly WalletLedgerService $walletLedgerService,
         private readonly PaymentGatewayService $paymentGatewayService,
-    )
-    {
-    }
+    ) {}
 
     public function wallet(Request $request): JsonResponse
     {
@@ -58,6 +56,10 @@ class ClientFinanceController extends Controller
                         'enabled' => (bool) $setting->flutterwave_enabled,
                         'public_key' => $setting->flutterwave_public_key,
                     ],
+                    'monnify' => [
+                        'enabled' => (bool) $setting->monnify_enabled,
+                        'environment' => $setting->monnify_environment,
+                    ],
                 ],
                 'manual_bank_name' => $setting->manual_bank_name,
                 'manual_account_name' => $setting->manual_account_name,
@@ -86,7 +88,7 @@ class ClientFinanceController extends Controller
 
         $validated = $request->validate([
             'amount' => ['required', 'numeric', 'min:1'],
-            'payment_method' => ['required', 'string', 'in:manual,stripe,paystack,flutterwave'],
+            'payment_method' => ['required', 'string', 'in:manual,stripe,paystack,flutterwave,monnify'],
             'note' => ['nullable', 'string', 'max:500'],
         ]);
 

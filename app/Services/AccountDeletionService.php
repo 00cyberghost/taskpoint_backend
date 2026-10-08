@@ -71,6 +71,7 @@ class AccountDeletionService
                 'phone' => null,
                 'avatar' => null,
                 'bank_name' => null,
+                'bank_code' => null,
                 'account_name' => null,
                 'account_number' => null,
                 'preferred_countries' => null,

@@ -14,6 +14,10 @@ class WithdrawalRequest extends Model
         'freelancer_id',
         'amount',
         'destination_type',
+        'payout_method',
+        'provider_reference',
+        'provider_payload',
+        'failure_reason',
         'destination_details',
         'status',
         'requested_at',
@@ -26,6 +30,7 @@ class WithdrawalRequest extends Model
         return [
             'amount' => 'decimal:2',
             'destination_details' => 'array',
+            'provider_payload' => 'array',
             'requested_at' => 'datetime',
             'processed_at' => 'datetime',
         ];

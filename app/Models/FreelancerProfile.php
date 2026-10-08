@@ -16,6 +16,7 @@ class FreelancerProfile extends Model
         'phone',
         'avatar',
         'bank_name',
+        'bank_code',
         'account_name',
         'account_number',
         'payout_status',

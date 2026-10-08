@@ -19,6 +19,7 @@ Route::redirect('admin/login', 'login')->name('admin.login');
 Route::get('payments/paystack/callback', [PaymentCallbackController::class, 'paystack'])->name('payments.paystack.callback');
 Route::get('payments/flutterwave/callback', [PaymentCallbackController::class, 'flutterwave'])->name('payments.flutterwave.callback');
 Route::get('payments/stripe/callback', [PaymentCallbackController::class, 'stripe'])->name('payments.stripe.callback');
+Route::get('payments/monnify/callback', [PaymentCallbackController::class, 'monnify'])->name('payments.monnify.callback');
 Route::get('payments/{provider}/cancel', [PaymentCallbackController::class, 'cancel'])->name('payments.cancel');
 
 Route::middleware(['auth', 'verified', 'admin'])->group(function () {

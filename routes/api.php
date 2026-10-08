@@ -8,6 +8,9 @@ use App\Http\Controllers\Api\ClientReviewController;
 use App\Http\Controllers\Api\FreelancerAssignmentController;
 use App\Http\Controllers\Api\FreelancerFinanceController;
 use App\Http\Controllers\Api\FreelancerNotificationController;
+use App\Http\Controllers\FlutterwaveWebhookController;
+use App\Http\Controllers\MonnifyWebhookController;
+use App\Http\Controllers\PaystackWebhookController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -25,6 +28,10 @@ Route::prefix('auth')->group(function (): void {
         Route::delete('account', [AuthController::class, 'deleteAccount']);
     });
 });
+
+Route::post('webhooks/paystack', [PaystackWebhookController::class, 'handle']);
+Route::post('webhooks/monnify', [MonnifyWebhookController::class, 'handle']);
+Route::post('webhooks/flutterwave', [FlutterwaveWebhookController::class, 'handle']);
 
 Route::middleware(['auth:sanctum', 'mobile.access'])->prefix('freelancer')->group(function (): void {
     Route::get('dashboard', [FreelancerAssignmentController::class, 'dashboard']);

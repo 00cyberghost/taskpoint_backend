@@ -8,6 +8,7 @@ use App\Models\PlatformPaymentSetting;
 use App\Models\WalletTransaction;
 use App\Models\WithdrawalRequest;
 use App\Services\NotificationService;
+use App\Services\PayoutGatewayService;
 use App\Services\WalletLedgerService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,6 +21,7 @@ class AdminFinanceController extends Controller
 {
     public function __construct(
         private readonly NotificationService $notificationService,
+        private readonly PayoutGatewayService $payoutGatewayService,
         private readonly WalletLedgerService $walletLedgerService,
     ) {}
 
@@ -52,6 +54,7 @@ class AdminFinanceController extends Controller
             'stripe_enabled' => ['required', 'boolean'],
             'paystack_enabled' => ['required', 'boolean'],
             'flutterwave_enabled' => ['required', 'boolean'],
+            'monnify_enabled' => ['required', 'boolean'],
             'manual_bank_name' => ['nullable', 'string', 'max:255'],
             'manual_account_name' => ['nullable', 'string', 'max:255'],
             'manual_account_number' => ['nullable', 'string', 'max:50'],
@@ -61,6 +64,13 @@ class AdminFinanceController extends Controller
             'paystack_secret_key' => ['nullable', 'string', 'max:255'],
             'flutterwave_public_key' => ['nullable', 'string', 'max:255'],
             'flutterwave_secret_key' => ['nullable', 'string', 'max:255'],
+            'monnify_api_key' => ['nullable', 'string', 'max:255'],
+            'monnify_secret_key' => ['nullable', 'string', 'max:255'],
+            'monnify_contract_code' => ['nullable', 'string', 'max:100'],
+            'monnify_environment' => ['required', 'string', 'in:sandbox,live'],
+            'default_payout_method' => ['required', 'string', 'in:manual,paystack,flutterwave,monnify'],
+            'monnify_disbursement_account_number' => ['nullable', 'string', 'max:50'],
+            'flutterwave_webhook_secret' => ['nullable', 'string', 'max:255'],
         ]);
 
         $enabledMethods = collect([
@@ -68,12 +78,44 @@ class AdminFinanceController extends Controller
             'stripe' => (bool) $validated['stripe_enabled'],
             'paystack' => (bool) $validated['paystack_enabled'],
             'flutterwave' => (bool) $validated['flutterwave_enabled'],
+            'monnify' => (bool) $validated['monnify_enabled'],
         ])->filter()->keys()->values();
 
         if ($enabledMethods->isEmpty()) {
             throw ValidationException::withMessages([
                 'manual_enabled' => ['At least one payment method must remain enabled.'],
             ]);
+        }
+
+        $keyErrors = [];
+        $payoutMethod = $validated['default_payout_method'];
+
+        if ($payoutMethod !== 'manual' && ! $enabledMethods->contains($payoutMethod)) {
+            $keyErrors['default_payout_method'] = ['Enable the selected gateway before using it for freelancer payouts.'];
+        }
+
+        if ((bool) $validated['paystack_enabled'] && filled($validated['paystack_public_key'] ?? null) && ! preg_match('/^pk_(test|live)_/', (string) $validated['paystack_public_key'])) {
+            $keyErrors['paystack_public_key'] = ['Paystack public keys must start with pk_test_ or pk_live_.'];
+        }
+
+        if ((bool) $validated['paystack_enabled'] && filled($validated['paystack_secret_key'] ?? null) && ! preg_match('/^sk_(test|live)_/', (string) $validated['paystack_secret_key'])) {
+            $keyErrors['paystack_secret_key'] = ['Paystack secret keys must start with sk_test_ or sk_live_.'];
+        }
+
+        if ($payoutMethod === 'paystack' && blank($validated['paystack_secret_key'] ?? null)) {
+            $keyErrors['default_payout_method'] = ['Add a Paystack secret key before selecting Paystack for payouts.'];
+        }
+
+        if ($payoutMethod === 'flutterwave' && blank($validated['flutterwave_secret_key'] ?? null)) {
+            $keyErrors['default_payout_method'] = ['Add a Flutterwave secret key before selecting Flutterwave for payouts.'];
+        }
+
+        if ($payoutMethod === 'monnify' && (blank($validated['monnify_api_key'] ?? null) || blank($validated['monnify_secret_key'] ?? null) || blank($validated['monnify_disbursement_account_number'] ?? null))) {
+            $keyErrors['default_payout_method'] = ['Add Monnify API credentials and the disbursement source account before selecting Monnify for payouts.'];
+        }
+
+        if ($keyErrors !== []) {
+            throw ValidationException::withMessages($keyErrors);
         }
 
         $validated['active_method'] = $enabledMethods->contains('manual') ? 'manual' : 'automatic';
@@ -103,43 +145,18 @@ class AdminFinanceController extends Controller
             ]);
         }
 
+        if ($validated['status'] === 'paid') {
+            $message = $this->payoutGatewayService->process($withdrawal, $request->user()?->id);
+
+            return back()->with('success', $message);
+        }
+
         DB::transaction(function () use ($request, $withdrawal, $validated): void {
             $withdrawal->update([
                 'status' => $validated['status'],
                 'processed_by' => $request->user()?->id,
                 'processed_at' => now(),
             ]);
-
-            if ($validated['status'] !== 'paid') {
-                return;
-            }
-
-            $wallet = $this->walletLedgerService->walletFor($withdrawal->freelancer_id, 'freelancer_main');
-
-            if ((float) $wallet->withdrawable_balance < (float) $withdrawal->amount) {
-                throw ValidationException::withMessages([
-                    'status' => ['The freelancer does not have enough withdrawable balance to settle this payout.'],
-                ]);
-            }
-
-            $this->walletLedgerService->debit($wallet, (float) $withdrawal->amount, [
-                'transaction_type' => 'withdrawal_payout',
-                'reference_type' => WithdrawalRequest::class,
-                'reference_id' => $withdrawal->id,
-                'status' => 'paid',
-                'description' => 'Withdrawal settled by admin payout operations.',
-            ], 0, -(float) $withdrawal->amount);
-
-            $this->notificationService->create(
-                $withdrawal->freelancer_id,
-                'withdrawal_paid',
-                'Withdrawal paid',
-                'Your withdrawal request has been marked as paid by the admin team.',
-                [
-                    'withdrawal_id' => $withdrawal->id,
-                    'amount' => $withdrawal->amount,
-                ],
-            );
         });
 
         return back()->with('success', 'Withdrawal status updated.');

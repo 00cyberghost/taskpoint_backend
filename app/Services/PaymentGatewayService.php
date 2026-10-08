@@ -7,6 +7,7 @@ use App\Models\PlatformPaymentSetting;
 use App\Models\User;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -16,8 +17,7 @@ class PaymentGatewayService
         protected HttpFactory $http,
         protected WalletLedgerService $walletLedgerService,
         protected NotificationService $notificationService,
-    ) {
-    }
+    ) {}
 
     public function initialize(User $client, string $method, float $amount): array
     {
@@ -33,6 +33,7 @@ class PaymentGatewayService
             'stripe' => $this->initializeStripe($client, $settings, $amount),
             'paystack' => $this->initializePaystack($client, $settings, $amount),
             'flutterwave' => $this->initializeFlutterwave($client, $settings, $amount),
+            'monnify' => $this->initializeMonnify($client, $settings, $amount),
             default => throw ValidationException::withMessages([
                 'payment_method' => ['Only automated gateways can be initialized here.'],
             ]),
@@ -61,6 +62,18 @@ class PaymentGatewayService
         $data = $payload['data'] ?? [];
 
         if (($data['status'] ?? null) !== 'success') {
+            return false;
+        }
+
+        if ((string) ($data['reference'] ?? '') !== (string) $fundingRequest->provider_reference) {
+            return false;
+        }
+
+        if (strtoupper((string) ($data['currency'] ?? '')) !== 'NGN') {
+            return false;
+        }
+
+        if ((int) ($data['amount'] ?? 0) !== (int) round((float) $fundingRequest->amount * 100)) {
             return false;
         }
 
@@ -136,11 +149,58 @@ class PaymentGatewayService
         );
     }
 
+    public function completeMonnify(ClientFundingRequest $fundingRequest, string $paymentReference): bool
+    {
+        $settings = PlatformPaymentSetting::query()->first();
+        $token = $settings ? $this->monnifyAccessToken($settings) : null;
+
+        if (! $settings || ! $token) {
+            return false;
+        }
+
+        $response = $this->http
+            ->withToken($token)
+            ->acceptJson()
+            ->get($this->monnifyBaseUrl($settings).'/api/v2/merchant/transactions/query', [
+                'paymentReference' => $paymentReference,
+            ]);
+
+        if (! $response->successful()) {
+            return false;
+        }
+
+        $payload = $response->json();
+        $data = $payload['responseBody'] ?? [];
+        $amountPaid = (float) ($data['amountPaid'] ?? 0);
+        $expectedAmount = (float) $fundingRequest->amount;
+        $returnedReference = (string) ($data['paymentReference'] ?? '');
+        $currency = strtoupper((string) ($data['currencyCode'] ?? $data['currency'] ?? ''));
+
+        if (($data['paymentStatus'] ?? null) !== 'PAID'
+            || $returnedReference !== (string) $fundingRequest->provider_reference
+            || $currency !== 'NGN'
+            || abs($amountPaid - $expectedAmount) > 0.01) {
+            return false;
+        }
+
+        return $this->approveAutomaticFunding(
+            fundingRequest: $fundingRequest,
+            providerReference: (string) ($fundingRequest->provider_reference ?? $paymentReference),
+            payload: $payload,
+        );
+    }
+
     protected function initializePaystack(User $client, PlatformPaymentSetting $settings, float $amount): array
     {
         if (! $settings->paystack_secret_key) {
             throw ValidationException::withMessages([
                 'payment_method' => ['Paystack keys are not configured yet.'],
+            ]);
+        }
+
+        if (! preg_match('/^sk_(test|live)_/', (string) $settings->paystack_secret_key)) {
+            throw ValidationException::withMessages([
+                'payment_method' => ['The Paystack secret key is invalid. Use the sk_test_ or sk_live_ key, not the public pk_ key.'],
             ]);
         }
 
@@ -158,15 +218,27 @@ class PaymentGatewayService
                 'callback_url' => url("/payments/paystack/callback?funding_request={$fundingRequest->id}"),
             ]);
 
-        if (! $response->successful()) {
+        $payload = $response->json();
+
+        if (! $response->successful() || ($payload['status'] ?? false) !== true) {
+            Log::warning('Paystack transaction initialization failed.', [
+                'funding_request_id' => $fundingRequest->id,
+                'status' => $response->status(),
+                'provider_code' => $payload['code'] ?? null,
+                'provider_message' => $payload['message'] ?? null,
+            ]);
+
             $this->markFailed($fundingRequest, $response->json());
 
             throw ValidationException::withMessages([
-                'payment_method' => ['Unable to initialize Paystack payment right now.'],
+                'payment_method' => [
+                    ($payload['code'] ?? null) === 'invalid_Key'
+                        ? 'Paystack rejected the secret key. Enter the matching sk_test_ or sk_live_ key in admin payment settings.'
+                        : 'Unable to initialize Paystack payment right now.',
+                ],
             ]);
         }
 
-        $payload = $response->json();
         $data = $payload['data'] ?? [];
 
         $fundingRequest->update([
@@ -178,6 +250,72 @@ class PaymentGatewayService
 
         return [
             'message' => 'Paystack payment initialized successfully.',
+            'funding_request' => $fundingRequest->fresh(),
+            'checkout_url' => $fundingRequest->checkout_url,
+        ];
+    }
+
+    protected function initializeMonnify(User $client, PlatformPaymentSetting $settings, float $amount): array
+    {
+        if (! $settings->monnify_api_key || ! $settings->monnify_secret_key || ! $settings->monnify_contract_code) {
+            throw ValidationException::withMessages([
+                'payment_method' => ['Monnify API key, secret key, and contract code are not configured yet.'],
+            ]);
+        }
+
+        $fundingRequest = $this->makeFundingRequest($client, $amount, 'monnify');
+        $reference = $this->reference('monnify', $fundingRequest->id);
+        $token = $this->monnifyAccessToken($settings);
+
+        if (! $token) {
+            $this->markFailed($fundingRequest, ['message' => 'Unable to authenticate with Monnify.']);
+
+            throw ValidationException::withMessages([
+                'payment_method' => ['Unable to authenticate with Monnify right now.'],
+            ]);
+        }
+
+        $response = $this->http
+            ->withToken($token)
+            ->acceptJson()
+            ->post($this->monnifyBaseUrl($settings).'/api/v1/merchant/transactions/initiate', [
+                'amount' => $amount,
+                'customerName' => $client->name,
+                'customerEmail' => $client->email,
+                'paymentReference' => $reference,
+                'paymentDescription' => 'TaskPoint wallet funding',
+                'currencyCode' => 'NGN',
+                'contractCode' => $settings->monnify_contract_code,
+                'redirectUrl' => url("/payments/monnify/callback?funding_request={$fundingRequest->id}"),
+                'paymentMethods' => ['CARD', 'ACCOUNT_TRANSFER'],
+            ]);
+
+        $payload = $response->json();
+        $data = $payload['responseBody'] ?? [];
+
+        if (! $response->successful() || ($payload['requestSuccessful'] ?? false) !== true || ! filled($data['checkoutUrl'] ?? null)) {
+            Log::warning('Monnify transaction initialization failed.', [
+                'funding_request_id' => $fundingRequest->id,
+                'status' => $response->status(),
+                'provider_message' => $payload['responseMessage'] ?? null,
+            ]);
+
+            $this->markFailed($fundingRequest, $payload);
+
+            throw ValidationException::withMessages([
+                'payment_method' => ['Unable to initialize Monnify payment right now.'],
+            ]);
+        }
+
+        $fundingRequest->update([
+            'provider_reference' => $reference,
+            'checkout_url' => $data['checkoutUrl'],
+            'provider_payload' => $payload,
+            'status' => 'processing',
+        ]);
+
+        return [
+            'message' => 'Monnify payment initialized successfully.',
             'funding_request' => $fundingRequest->fresh(),
             'checkout_url' => $fundingRequest->checkout_url,
         ];
@@ -285,6 +423,32 @@ class PaymentGatewayService
             'funding_request' => $fundingRequest->fresh(),
             'checkout_url' => $fundingRequest->checkout_url,
         ];
+    }
+
+    protected function monnifyAccessToken(PlatformPaymentSetting $settings): ?string
+    {
+        $response = $this->http
+            ->withBasicAuth((string) $settings->monnify_api_key, (string) $settings->monnify_secret_key)
+            ->acceptJson()
+            ->post($this->monnifyBaseUrl($settings).'/api/v1/auth/login');
+
+        if (! $response->successful()) {
+            Log::warning('Monnify authentication failed.', [
+                'status' => $response->status(),
+                'provider_message' => $response->json('responseMessage'),
+            ]);
+
+            return null;
+        }
+
+        return $response->json('responseBody.accessToken');
+    }
+
+    protected function monnifyBaseUrl(PlatformPaymentSetting $settings): string
+    {
+        return $settings->monnify_environment === 'live'
+            ? 'https://api.monnify.com'
+            : 'https://sandbox.monnify.com';
     }
 
     protected function makeFundingRequest(User $client, float $amount, string $method): ClientFundingRequest
