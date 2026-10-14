@@ -5,14 +5,14 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
 use Laravel\Fortify\TwoFactorAuthenticatable;
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
@@ -83,6 +83,18 @@ class User extends Authenticatable implements MustVerifyEmail
     public function freelancerProfile(): HasOne
     {
         return $this->hasOne(FreelancerProfile::class);
+    }
+
+    public function pendingBankChange(): HasOne
+    {
+        return $this->hasOne(FreelancerBankChangeRequest::class, 'freelancer_id')
+            ->where('status', 'pending')
+            ->latestOfMany();
+    }
+
+    public function freelancerBankChangeRequests(): HasMany
+    {
+        return $this->hasMany(FreelancerBankChangeRequest::class, 'freelancer_id');
     }
 
     public function clientCampaigns(): HasMany

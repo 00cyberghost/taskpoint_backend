@@ -1,10 +1,12 @@
 <?php
 
+use App\Mail\EmailVerificationOtpMail;
+use App\Mail\PasswordResetOtpMail;
 use App\Models\Campaign;
 use App\Models\CampaignPricing;
 use App\Models\ClientProfile;
-use App\Models\FreelancerProfile;
 use App\Models\EmailVerificationOtp;
+use App\Models\FreelancerProfile;
 use App\Models\Notification;
 use App\Models\SubmissionProof;
 use App\Models\TaskAssignment;
@@ -13,13 +15,10 @@ use App\Models\TaskTypePricing;
 use App\Models\User;
 use App\Models\Wallet;
 use App\Services\GoogleIdentityService;
-use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Laravel\Sanctum\Sanctum;
-use App\Mail\EmailVerificationOtpMail;
 
 it('registers a freelancer with profile and location metadata', function () {
     Mail::fake();
@@ -156,8 +155,8 @@ it('logs a freelancer in with google and auto-verifies the email', function () {
     expect(FreelancerProfile::query()->where('user_id', $user->id)->exists())->toBeTrue();
 });
 
-it('emails a password reset link for a freelancer account', function () {
-    NotificationFacade::fake();
+it('resets a freelancer password with an emailed otp', function () {
+    Mail::fake();
 
     $freelancer = User::factory()->create([
         'role' => 'freelancer',
@@ -167,9 +166,26 @@ it('emails a password reset link for a freelancer account', function () {
 
     $this->postJson('/api/auth/forgot-password', [
         'email' => $freelancer->email,
-    ])->assertOk()->assertJsonPath('message', 'Password reset link sent successfully.');
+    ])->assertOk()->assertJsonPath('message', 'Password reset code sent successfully.');
 
-    NotificationFacade::assertSentTo($freelancer, ResetPassword::class);
+    $otp = null;
+    Mail::assertSent(PasswordResetOtpMail::class, function (PasswordResetOtpMail $mail) use (&$otp): bool {
+        $otp = $mail->otp;
+
+        return true;
+    });
+
+    $this->postJson('/api/auth/reset-password', [
+        'email' => $freelancer->email,
+        'otp' => $otp,
+        'password' => 'new-password-123',
+        'password_confirmation' => 'new-password-123',
+    ])->assertOk()->assertJsonPath('message', 'Password reset successfully. You can now log in with your new password.');
+
+    $this->postJson('/api/auth/login', [
+        'email' => $freelancer->email,
+        'password' => 'new-password-123',
+    ])->assertOk();
 });
 
 it('starts and submits an assigned task with proof uploads', function () {
@@ -489,7 +505,12 @@ it('returns active task types from the database on the freelancer dashboard', fu
 
 it('rejects withdrawals larger than the freelancer withdrawable balance', function () {
     $freelancer = User::factory()->create(['role' => 'freelancer']);
-    FreelancerProfile::query()->create(['user_id' => $freelancer->id]);
+    FreelancerProfile::query()->create([
+        'user_id' => $freelancer->id,
+        'bank_name' => 'GTBank',
+        'account_name' => 'Ada Worker',
+        'account_number' => '0123456789',
+    ]);
 
     Wallet::query()->create([
         'user_id' => $freelancer->id,
@@ -536,4 +557,27 @@ it('updates freelancer banking details', function () {
     expect($freelancer->fresh()->freelancerProfile?->bank_name)->toBe('Access Bank');
     expect($freelancer->fresh()->freelancerProfile?->account_name)->toBe('Ada Worker');
     expect($freelancer->fresh()->freelancerProfile?->account_number)->toBe('0123456789');
+});
+
+it('requires admin approval for banking changes after initial setup', function () {
+    $freelancer = User::factory()->create(['role' => 'freelancer']);
+    FreelancerProfile::query()->create([
+        'user_id' => $freelancer->id,
+        'bank_name' => 'Access Bank',
+        'account_name' => 'Ada Worker',
+        'account_number' => '0123456789',
+    ]);
+
+    Sanctum::actingAs($freelancer);
+
+    $this->patchJson('/api/freelancer/profile/banking', [
+        'bank_name' => 'GTBank',
+        'account_name' => 'Ada Worker New',
+        'account_number' => '9876543210',
+    ])->assertOk()
+        ->assertJsonPath('pending_bank_change.status', 'pending')
+        ->assertJsonPath('freelancer_profile.bank_name', 'Access Bank');
+
+    expect($freelancer->fresh()->freelancerProfile?->bank_name)->toBe('Access Bank');
+    expect($freelancer->freelancerBankChangeRequests()->where('status', 'pending')->count())->toBe(1);
 });

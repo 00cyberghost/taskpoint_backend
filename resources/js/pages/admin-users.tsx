@@ -1,5 +1,5 @@
 import { Head, router } from '@inertiajs/react';
-import { BadgeCheck, Building2, ShieldCheck, UserCircle2 } from 'lucide-react';
+import { BadgeCheck, Building2, CheckCircle2, Clock3, ShieldCheck, UserCircle2, XCircle } from 'lucide-react';
 import AppLayout from '@/layouts/app-layout';
 import { dashboard } from '@/routes';
 import type { BreadcrumbItem } from '@/types';
@@ -31,6 +31,21 @@ type Props = {
     users: {
         data: UserItem[];
     };
+    pendingBankChanges: BankChangeItem[];
+};
+
+type BankChangeItem = {
+    id: number;
+    bank_name: string;
+    bank_code?: string | null;
+    account_name: string;
+    account_number: string;
+    created_at: string;
+    freelancer?: {
+        id: number;
+        name: string;
+        email: string;
+    } | null;
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -38,7 +53,7 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Users', href: '/admin/users' },
 ];
 
-export default function AdminUsers({ users }: Props) {
+export default function AdminUsers({ users, pendingBankChanges }: Props) {
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="User Management" />
@@ -58,6 +73,70 @@ export default function AdminUsers({ users }: Props) {
                         </div>
                     </div>
                 </section>
+
+                {pendingBankChanges.length > 0 ? (
+                    <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+                        <div className="flex items-start gap-3">
+                            <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                                <Clock3 className="size-5" />
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-semibold text-stone-900">Banking changes awaiting approval</h2>
+                                <p className="mt-1 text-sm text-stone-600">
+                                    The existing payout account remains active until one of these requests is approved.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 grid gap-4">
+                            {pendingBankChanges.map((change) => (
+                                <div key={change.id} className="rounded-2xl border border-amber-200 bg-white p-4">
+                                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                        <div>
+                                            <p className="font-semibold text-stone-900">
+                                                {change.freelancer?.name ?? 'Freelancer'}
+                                            </p>
+                                            <p className="text-sm text-stone-500">{change.freelancer?.email}</p>
+                                            <p className="mt-3 text-sm text-stone-700">
+                                                {change.account_name} · {change.account_number} · {change.bank_name}
+                                                {change.bank_code ? ` (${change.bank_code})` : ''}
+                                            </p>
+                                            <p className="mt-1 text-xs text-stone-400">
+                                                Submitted {new Date(change.created_at).toLocaleString()}
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    router.patch(`/admin/users/bank-changes/${change.id}`, {
+                                                        status: 'approved',
+                                                    })
+                                                }
+                                                className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold text-white"
+                                            >
+                                                <CheckCircle2 className="size-4" />
+                                                Approve
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    router.patch(`/admin/users/bank-changes/${change.id}`, {
+                                                        status: 'rejected',
+                                                    })
+                                                }
+                                                className="inline-flex items-center gap-2 rounded-full bg-red-100 px-4 py-2 text-xs font-semibold text-red-700"
+                                            >
+                                                <XCircle className="size-4" />
+                                                Reject
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                ) : null}
 
                 <div className="grid gap-4">
                     {users.data.map((user) => (

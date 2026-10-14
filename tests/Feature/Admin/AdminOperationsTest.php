@@ -4,6 +4,7 @@ use App\Models\Campaign;
 use App\Models\CampaignPricing;
 use App\Models\ClientFundingRequest;
 use App\Models\ClientProfile;
+use App\Models\FreelancerBankChangeRequest;
 use App\Models\FreelancerProfile;
 use App\Models\Notification;
 use App\Models\PlatformPaymentSetting;
@@ -115,6 +116,37 @@ it('settles wallet balances when a withdrawal is marked paid', function () {
         ->toBeTrue();
     expect(Notification::query()->where('user_id', $freelancer->id)->where('type', 'withdrawal_paid')->exists())
         ->toBeTrue();
+});
+
+it('requires admin approval before a freelancer bank change becomes active', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $freelancer = User::factory()->create(['role' => 'freelancer']);
+
+    FreelancerProfile::query()->create([
+        'user_id' => $freelancer->id,
+        'bank_name' => 'Access Bank',
+        'account_name' => 'Ada Worker',
+        'account_number' => '0123456789',
+        'payout_status' => 'approved',
+    ]);
+
+    $change = FreelancerBankChangeRequest::query()->create([
+        'freelancer_id' => $freelancer->id,
+        'bank_name' => 'GTBank',
+        'bank_code' => '058',
+        'account_name' => 'Ada Worker New',
+        'account_number' => '9876543210',
+        'status' => 'pending',
+    ]);
+
+    $this->actingAs($admin)
+        ->patch("/admin/users/bank-changes/{$change->id}", ['status' => 'approved'])
+        ->assertRedirect();
+
+    expect($freelancer->fresh()->freelancerProfile?->bank_name)->toBe('GTBank');
+    expect($freelancer->fresh()->freelancerProfile?->account_number)->toBe('9876543210');
+    expect($change->fresh()->status)->toBe('approved');
+    expect($change->fresh()->reviewed_by)->toBe($admin->id);
 });
 
 it('pays a withdrawal through the configured Paystack gateway', function () {

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\FreelancerBankChangeRequest;
+use App\Models\FreelancerProfile;
 use App\Models\WalletTransaction;
 use App\Models\WithdrawalRequest;
 use App\Services\NotificationService;
@@ -68,13 +70,23 @@ class FreelancerFinanceController extends Controller
             ]);
         }
 
-        $profile = $request->user()->freelancerProfile;
-        $destinationDetails = array_merge([
-            'bank_name' => $profile?->bank_name,
-            'bank_code' => $profile?->bank_code,
-            'account_name' => $profile?->account_name,
-            'account_number' => $profile?->account_number,
-        ], $validated['destination_details']);
+        $profile = FreelancerProfile::query()
+            ->where('user_id', $request->user()->id)
+            ->first();
+
+        if (! $profile?->bank_name || ! $profile->account_name || ! $profile->account_number) {
+            throw ValidationException::withMessages([
+                'banking' => ['Add and save your complete bank details before requesting a payout.'],
+            ]);
+        }
+
+        // Use the approved profile snapshot, not client-provided destination data.
+        $destinationDetails = [
+            'bank_name' => $profile->bank_name,
+            'bank_code' => $profile->bank_code,
+            'account_name' => $profile->account_name,
+            'account_number' => $profile->account_number,
+        ];
 
         $withdrawal = WithdrawalRequest::query()->create([
             'freelancer_id' => $request->user()->id,
@@ -116,17 +128,50 @@ class FreelancerFinanceController extends Controller
             ['phone' => $request->user()->phone],
         );
 
-        $profile->update([
+        $hasActiveBankDetails = filled($profile->bank_name)
+            || filled($profile->account_name)
+            || filled($profile->account_number);
+
+        if (! $hasActiveBankDetails) {
+            $profile->update([
+                'bank_name' => $validated['bank_name'],
+                'bank_code' => $validated['bank_code'] ?? null,
+                'account_name' => $validated['account_name'],
+                'account_number' => $validated['account_number'],
+                'payout_status' => 'approved',
+            ]);
+
+            return response()->json([
+                'message' => 'Banking details saved successfully.',
+                'freelancer_profile' => $profile->fresh(),
+                'pending_bank_change' => null,
+            ]);
+        }
+
+        $pendingChange = FreelancerBankChangeRequest::query()
+            ->where('freelancer_id', $request->user()->id)
+            ->where('status', 'pending')
+            ->first();
+
+        if ($pendingChange) {
+            throw ValidationException::withMessages([
+                'banking' => ['A banking change request is already waiting for admin approval.'],
+            ]);
+        }
+
+        $pendingChange = FreelancerBankChangeRequest::query()->create([
+            'freelancer_id' => $request->user()->id,
             'bank_name' => $validated['bank_name'],
             'bank_code' => $validated['bank_code'] ?? null,
             'account_name' => $validated['account_name'],
             'account_number' => $validated['account_number'],
-            'payout_status' => 'pending_review',
+            'status' => 'pending',
         ]);
 
         return response()->json([
-            'message' => 'Banking details updated successfully.',
+            'message' => 'Banking change submitted for admin approval. Your current account remains active until it is reviewed.',
             'freelancer_profile' => $profile->fresh(),
+            'pending_bank_change' => $pendingChange,
         ]);
     }
 }

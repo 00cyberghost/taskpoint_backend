@@ -28,6 +28,7 @@ Route::middleware(['auth', 'verified', 'admin'])->group(function () {
     Route::prefix('admin')->name('admin.')->group(function (): void {
         Route::get('users', [AdminUserController::class, 'index'])->name('users.index');
         Route::patch('users/{user}/moderation', [AdminUserController::class, 'updateModeration'])->name('users.moderation.update');
+        Route::patch('users/bank-changes/{bankChangeRequest}', [AdminUserController::class, 'reviewBankChange'])->name('users.bank-changes.review');
 
         Route::get('campaigns', [AdminCampaignController::class, 'index'])->name('campaigns.index');
         Route::patch('campaigns/task-type-pricing/defaults', [AdminCampaignController::class, 'updateTaskTypePricing'])->name('campaigns.task-type-pricing.update');

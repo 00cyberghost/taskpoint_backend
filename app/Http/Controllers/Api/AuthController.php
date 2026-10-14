@@ -11,12 +11,13 @@ use App\Models\User;
 use App\Services\AccountDeletionService;
 use App\Services\EmailVerificationOtpService;
 use App\Services\GoogleIdentityService;
+use App\Services\PasswordResetOtpService;
 use App\Support\ResolvesRequestLocation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -25,8 +26,8 @@ class AuthController extends Controller
         protected AccountDeletionService $accountDeletionService,
         protected EmailVerificationOtpService $emailVerificationOtpService,
         protected GoogleIdentityService $googleIdentityService,
-    ) {
-    }
+        protected PasswordResetOtpService $passwordResetOtpService,
+    ) {}
 
     public function register(Request $request, CreateNewUser $creator): JsonResponse
     {
@@ -36,7 +37,7 @@ class AuthController extends Controller
 
         return response()->json([
             'token' => $token,
-            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'wallets']),
+            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'pendingBankChange', 'wallets']),
         ], 201);
     }
 
@@ -86,7 +87,7 @@ class AuthController extends Controller
 
         return response()->json([
             'token' => $token,
-            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'wallets']),
+            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'pendingBankChange', 'wallets']),
         ]);
     }
 
@@ -176,14 +177,14 @@ class AuthController extends Controller
 
         return response()->json([
             'token' => $token,
-            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'wallets']),
+            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'pendingBankChange', 'wallets']),
         ]);
     }
 
     public function me(Request $request): JsonResponse
     {
         return response()->json([
-            'user' => $request->user()?->load(['clientProfile', 'freelancerProfile', 'wallets']),
+            'user' => $request->user()?->load(['clientProfile', 'freelancerProfile', 'pendingBankChange', 'wallets']),
         ]);
     }
 
@@ -223,18 +224,47 @@ class AuthController extends Controller
             'email' => ['required', 'email'],
         ]);
 
-        $status = Password::sendResetLink([
-            'email' => $validated['email'],
-        ]);
+        $user = User::query()->where('email', $validated['email'])->first();
 
-        if ($status !== Password::RESET_LINK_SENT) {
+        if (! $user || ! in_array($user->role, ['client', 'freelancer'], true)) {
             throw ValidationException::withMessages([
-                'email' => [__($status)],
+                'email' => ['We could not find an eligible mobile account with that email address.'],
             ]);
         }
 
+        if (in_array($user->status, ['suspended', 'banned', 'deleted'], true)) {
+            throw ValidationException::withMessages([
+                'email' => ['This account cannot reset its password. Please contact support.'],
+            ]);
+        }
+
+        $this->passwordResetOtpService->send($user);
+
         return response()->json([
-            'message' => 'Password reset link sent successfully.',
+            'message' => 'Password reset code sent successfully.',
+        ]);
+    }
+
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'email'],
+            'otp' => ['required', 'digits:6'],
+            'password' => ['required', 'string', PasswordRule::default(), 'confirmed'],
+        ]);
+
+        $user = User::query()->where('email', $validated['email'])->first();
+
+        if (! $user || ! in_array($user->role, ['client', 'freelancer'], true)) {
+            throw ValidationException::withMessages([
+                'email' => ['We could not find an eligible mobile account with that email address.'],
+            ]);
+        }
+
+        $this->passwordResetOtpService->reset($user, $validated['otp'], $validated['password']);
+
+        return response()->json([
+            'message' => 'Password reset successfully. You can now log in with your new password.',
         ]);
     }
 
@@ -279,7 +309,7 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Email verified successfully.',
-            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'wallets']),
+            'user' => $user->fresh()->load(['clientProfile', 'freelancerProfile', 'pendingBankChange', 'wallets']),
         ]);
     }
 
