@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\EnsureMobileUserCanAccessPlatform;
+use App\Http\Middleware\EnsureMobileUserHasRole;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Application;
@@ -21,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => EnsureUserIsAdmin::class,
             'mobile.access' => EnsureMobileUserCanAccessPlatform::class,
+            'mobile.role' => EnsureMobileUserHasRole::class,
         ]);
 
         $middleware->web(append: [

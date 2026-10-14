@@ -1,19 +1,19 @@
 <?php
 
+use App\Mail\EmailVerificationOtpMail;
 use App\Models\Campaign;
 use App\Models\ClientFundingRequest;
 use App\Models\ClientProfile;
 use App\Models\EmailVerificationOtp;
 use App\Models\PlatformPaymentSetting;
 use App\Models\TaskAssignment;
-use App\Models\TaskTypePricing;
 use App\Models\TaskSubmission;
+use App\Models\TaskTypePricing;
 use App\Models\User;
 use App\Models\Wallet;
 use App\Services\GoogleIdentityService;
 use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
-use App\Mail\EmailVerificationOtpMail;
 
 it('registers a client and creates the client profile', function () {
     Mail::fake();
@@ -53,6 +53,16 @@ it('blocks unverified clients from protected platform routes', function () {
     $this->getJson('/api/client/dashboard')
         ->assertForbidden()
         ->assertJsonPath('message', 'Please verify your email address before using the platform.');
+});
+
+it('blocks freelancer accounts from client endpoints', function () {
+    $freelancer = User::factory()->create(['role' => 'freelancer']);
+
+    Sanctum::actingAs($freelancer);
+
+    $this->getJson('/api/client/dashboard')
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Only client accounts can access this area.');
 });
 
 it('verifies a client email with otp', function () {

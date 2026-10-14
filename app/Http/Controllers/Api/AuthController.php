@@ -46,6 +46,7 @@ class AuthController extends Controller
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
+            'role' => ['nullable', 'string', 'in:client,freelancer'],
             'device_name' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -66,6 +67,12 @@ class AuthController extends Controller
         if (! in_array($user->role, ['client', 'freelancer'], true)) {
             throw ValidationException::withMessages([
                 'email' => ['This account cannot use the mobile app authentication flow.'],
+            ]);
+        }
+
+        if (! empty($credentials['role']) && $user->role !== $credentials['role']) {
+            throw ValidationException::withMessages([
+                'role' => ["This account is registered as a {$user->role}, not a {$credentials['role']} account."],
             ]);
         }
 

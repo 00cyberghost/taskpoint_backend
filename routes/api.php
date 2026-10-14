@@ -34,7 +34,7 @@ Route::post('webhooks/paystack', [PaystackWebhookController::class, 'handle']);
 Route::post('webhooks/monnify', [MonnifyWebhookController::class, 'handle']);
 Route::post('webhooks/flutterwave', [FlutterwaveWebhookController::class, 'handle']);
 
-Route::middleware(['auth:sanctum', 'mobile.access'])->prefix('freelancer')->group(function (): void {
+Route::middleware(['auth:sanctum', 'mobile.access', 'mobile.role:freelancer'])->prefix('freelancer')->group(function (): void {
     Route::get('dashboard', [FreelancerAssignmentController::class, 'dashboard']);
     Route::get('tasks', [FreelancerAssignmentController::class, 'index']);
     Route::get('tasks/{assignment}', [FreelancerAssignmentController::class, 'show']);
@@ -51,7 +51,7 @@ Route::middleware(['auth:sanctum', 'mobile.access'])->prefix('freelancer')->grou
     Route::post('push-tokens', [FreelancerNotificationController::class, 'registerPushToken']);
 });
 
-Route::middleware(['auth:sanctum', 'mobile.access'])->prefix('client')->group(function (): void {
+Route::middleware(['auth:sanctum', 'mobile.access', 'mobile.role:client'])->prefix('client')->group(function (): void {
     Route::get('dashboard', [ClientCampaignController::class, 'dashboard']);
     Route::get('campaigns', [ClientCampaignController::class, 'index']);
     Route::post('campaigns', [ClientCampaignController::class, 'store']);

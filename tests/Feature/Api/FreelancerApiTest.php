@@ -121,6 +121,25 @@ it('blocks suspended freelancer accounts from login and registration reuse', fun
         ])->assertUnprocessable()->assertJsonValidationErrors(['email']);
 });
 
+it('blocks client accounts from freelancer login and endpoints', function () {
+    $client = User::factory()->create([
+        'role' => 'client',
+        'email' => 'client-role@example.com',
+    ]);
+
+    $this->postJson('/api/auth/login', [
+        'email' => $client->email,
+        'password' => 'password',
+        'role' => 'freelancer',
+    ])->assertUnprocessable()->assertJsonValidationErrors(['role']);
+
+    Sanctum::actingAs($client);
+
+    $this->getJson('/api/freelancer/dashboard')
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Only freelancer accounts can access this area.');
+});
+
 it('logs a freelancer in with google and auto-verifies the email', function () {
     app()->instance(GoogleIdentityService::class, new class extends GoogleIdentityService
     {
