@@ -7,8 +7,8 @@ use App\Models\Campaign;
 use App\Models\CampaignPricing;
 use App\Models\CampaignTargetingRule;
 use App\Models\ClientCampaignFund;
-use App\Models\TaskTypePricing;
 use App\Models\TaskSubmission;
+use App\Models\TaskTypePricing;
 use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\WalletLedgerService;
@@ -23,8 +23,7 @@ class ClientCampaignController extends Controller
     public function __construct(
         private readonly WalletLedgerService $walletLedgerService,
         private readonly NotificationService $notificationService,
-    ) {
-    }
+    ) {}
 
     public function dashboard(Request $request): JsonResponse
     {
@@ -184,7 +183,7 @@ class ClientCampaignController extends Controller
     public function show(Request $request, Campaign $campaign): JsonResponse
     {
         $client = $this->client($request);
-        abort_unless($campaign->client_id === $client->id, 403);
+        abort_unless((int) $campaign->client_id === (int) $client->id, 403);
 
         $campaign->load([
             'pricing',
@@ -206,7 +205,7 @@ class ClientCampaignController extends Controller
             'recent_submissions' => $recentSubmissions,
         ]);
     }
-    
+
     private function client(Request $request): User
     {
         $user = $request->user();

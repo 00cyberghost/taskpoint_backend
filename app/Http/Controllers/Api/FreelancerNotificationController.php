@@ -56,7 +56,7 @@ class FreelancerNotificationController extends Controller
             ]
         );
 
-        if ($device->user_id !== $request->user()->id) {
+        if ((int) $device->user_id !== (int) $request->user()->id) {
             $device->update([
                 'user_id' => $request->user()->id,
             ]);

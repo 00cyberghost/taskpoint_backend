@@ -12,9 +12,7 @@ use Illuminate\Http\Request;
 
 class ClientReviewController extends Controller
 {
-    public function __construct(private readonly NotificationService $notificationService)
-    {
-    }
+    public function __construct(private readonly NotificationService $notificationService) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -38,7 +36,7 @@ class ClientReviewController extends Controller
     public function approve(Request $request, TaskSubmission $submission): JsonResponse
     {
         $client = $this->client($request);
-        abort_unless($submission->client_id === $client->id, 403);
+        abort_unless((int) $submission->client_id === (int) $client->id, 403);
 
         $submission->update([
             'client_decision' => 'approved',
@@ -75,7 +73,7 @@ class ClientReviewController extends Controller
     public function reject(Request $request, TaskSubmission $submission): JsonResponse
     {
         $client = $this->client($request);
-        abort_unless($submission->client_id === $client->id, 403);
+        abort_unless((int) $submission->client_id === (int) $client->id, 403);
 
         $validated = $request->validate([
             'reason' => ['required', 'string', 'max:500'],

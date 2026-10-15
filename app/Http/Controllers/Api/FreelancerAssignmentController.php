@@ -71,7 +71,7 @@ class FreelancerAssignmentController extends Controller
 
     public function show(Request $request, TaskAssignment $assignment): JsonResponse
     {
-        abort_unless($assignment->freelancer_id === $request->user()->id, 403);
+        abort_unless((int) $assignment->freelancer_id === (int) $request->user()->id, 403);
 
         return response()->json([
             'assignment' => $assignment->load([
@@ -87,7 +87,7 @@ class FreelancerAssignmentController extends Controller
 
     public function start(Request $request, TaskAssignment $assignment): JsonResponse
     {
-        abort_unless($assignment->freelancer_id === $request->user()->id, 403);
+        abort_unless((int) $assignment->freelancer_id === (int) $request->user()->id, 403);
 
         if (! in_array($assignment->status, ['assigned', 'in_progress'], true)) {
             throw ValidationException::withMessages([
@@ -125,7 +125,7 @@ class FreelancerAssignmentController extends Controller
 
     public function submit(Request $request, TaskAssignment $assignment): JsonResponse
     {
-        abort_unless($assignment->freelancer_id === $request->user()->id, 403);
+        abort_unless((int) $assignment->freelancer_id === (int) $request->user()->id, 403);
 
         if (! in_array($assignment->status, ['assigned', 'in_progress'], true)) {
             throw ValidationException::withMessages([

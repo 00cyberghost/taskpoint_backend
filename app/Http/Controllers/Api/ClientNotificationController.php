@@ -60,7 +60,7 @@ class ClientNotificationController extends Controller
             ]
         );
 
-        if ($device->user_id !== $client->id) {
+        if ((int) $device->user_id !== (int) $client->id) {
             $device->update(['user_id' => $client->id]);
         }
 
