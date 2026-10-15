@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Notification;
 use App\Models\User;
+use App\Services\FirebaseMessagingService;
 use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,8 +17,8 @@ class AdminNotificationController extends Controller
 {
     public function __construct(
         private readonly NotificationService $notificationService,
-    ) {
-    }
+        private readonly FirebaseMessagingService $firebaseMessagingService,
+    ) {}
 
     public function index(): Response
     {
@@ -77,8 +78,13 @@ class AdminNotificationController extends Controller
                 'sent_by_admin_id' => $request->user()?->id,
             ],
             imagePath: $imagePath,
+            topic: $validated['audience'] === 'individual'
+                ? null
+                : $this->firebaseMessagingService->topicForAudience($validated['audience']),
         );
 
-        return back()->with('success', "Notification queued for {$sent->count()} recipient(s).");
+        $deliveryLabel = config('services.notifications.queue_enabled') ? 'queued' : 'sent';
+
+        return back()->with('success', "Notification {$deliveryLabel} for {$sent->count()} recipient(s).");
     }
 }

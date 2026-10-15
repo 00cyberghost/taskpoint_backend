@@ -94,6 +94,7 @@ class FirebaseMessagingService
 
             if ($response->successful()) {
                 $successCount++;
+
                 continue;
             }
 
@@ -113,6 +114,160 @@ class FirebaseMessagingService
                 : ($successCount > 0 ? 'sent' : 'failed'),
             'sent_at' => now(),
         ]);
+    }
+
+    /**
+     * Deliver one broadcast notification to an FCM topic and update the
+     * corresponding in-app notification rows with the same delivery result.
+     *
+     * @param  array<int, int>  $notificationIds
+     */
+    public function sendTopicNotification(?Notification $notification, string $topic, array $notificationIds = []): void
+    {
+        if (! $notification || $topic === '') {
+            return;
+        }
+
+        $notificationIds = array_values(array_unique(array_map('intval', $notificationIds ?: [$notification->id])));
+
+        if (! config('services.firebase.enabled')) {
+            Log::info('Firebase topic notification dispatch skipped because Firebase is disabled.', [
+                'notification_id' => $notification->id,
+                'topic' => $topic,
+            ]);
+
+            $this->updateDeliveryStatus($notificationIds, 'disabled');
+
+            return;
+        }
+
+        $serviceAccount = $this->serviceAccountCredentials();
+        $projectId = config('services.firebase.project_id') ?: ($serviceAccount['project_id'] ?? null);
+        $endpointTemplate = config('services.firebase.endpoint');
+
+        if (! is_array($serviceAccount) || ! $projectId || ! is_string($endpointTemplate) || $endpointTemplate === '') {
+            $this->updateDeliveryStatus($notificationIds, 'misconfigured');
+
+            return;
+        }
+
+        $accessToken = $this->accessToken($serviceAccount);
+
+        if (! is_string($accessToken) || $accessToken === '') {
+            $this->updateDeliveryStatus($notificationIds, 'misconfigured');
+
+            return;
+        }
+
+        $data = $this->normalizeDataPayload(array_filter([
+            'type' => $notification->type,
+            'image_url' => $notification->image_url,
+            'topic' => $topic,
+            ...($notification->data_json ?? []),
+        ], static fn ($value) => $value !== null));
+
+        $endpoint = str_replace('{project_id}', $projectId, $endpointTemplate);
+        $response = Http::withToken($accessToken)
+            ->acceptJson()
+            ->post($endpoint, [
+                'message' => [
+                    'topic' => $topic,
+                    'notification' => array_filter([
+                        'title' => $notification->title,
+                        'body' => $notification->body,
+                        'image' => $notification->image_url,
+                    ]),
+                    'data' => $data,
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            Log::warning('Firebase topic notification dispatch failed.', [
+                'notification_id' => $notification->id,
+                'topic' => $topic,
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
+
+            $this->updateDeliveryStatus($notificationIds, 'failed');
+
+            return;
+        }
+
+        $this->updateDeliveryStatus($notificationIds, 'sent');
+    }
+
+    /**
+     * Subscribe a native FCM registration token to the role topics used for
+     * platform-wide broadcasts. This uses Firebase's topic-management API.
+     * If no server key is configured, direct-token delivery remains available.
+     *
+     * @param  array<int, string>  $topics
+     */
+    public function subscribeTokenToTopics(string $token, array $topics): void
+    {
+        $serverKey = config('services.firebase.server_key');
+        $baseEndpoint = config('services.firebase.topic_management_endpoint');
+
+        if (! config('services.firebase.enabled') || ! is_string($serverKey) || $serverKey === '' || ! is_string($baseEndpoint) || $baseEndpoint === '') {
+            return;
+        }
+
+        foreach (array_values(array_unique(array_filter($topics))) as $topic) {
+            $response = Http::withHeaders([
+                'Authorization' => 'key='.$serverKey,
+            ])
+                ->acceptJson()
+                ->timeout(10)
+                ->post(rtrim($baseEndpoint, '/').'/'.rawurlencode($token).'/rel/topics/'.rawurlencode($topic));
+
+            if (! $response->successful()) {
+                Log::warning('Firebase topic subscription failed.', [
+                    'topic' => $topic,
+                    'status' => $response->status(),
+                    'body' => $response->json(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function topicsForRole(string $role): array
+    {
+        $topics = config('services.firebase.topics', []);
+        $roleTopic = $topics[$role.'s'] ?? null;
+        $allTopic = $topics['all'] ?? null;
+
+        return array_values(array_filter([$roleTopic, $allTopic], static fn ($topic) => is_string($topic) && $topic !== ''));
+    }
+
+    public function topicForAudience(string $audience): ?string
+    {
+        if (! $this->topicManagementConfigured()) {
+            return null;
+        }
+
+        $topics = config('services.firebase.topics', []);
+
+        $topic = match ($audience) {
+            'clients' => $topics['clients'] ?? null,
+            'freelancers' => $topics['freelancers'] ?? null,
+            'both' => $topics['all'] ?? null,
+            default => null,
+        };
+
+        return is_string($topic) && $topic !== '' ? $topic : null;
+    }
+
+    private function topicManagementConfigured(): bool
+    {
+        return config('services.firebase.enabled')
+            && is_string(config('services.firebase.server_key'))
+            && config('services.firebase.server_key') !== ''
+            && is_string(config('services.firebase.topic_management_endpoint'))
+            && config('services.firebase.topic_management_endpoint') !== '';
     }
 
     private function serviceAccountCredentials(): ?array
@@ -190,6 +345,19 @@ class FirebaseMessagingService
     }
 
     /**
+     * @param  array<int, int>  $notificationIds
+     */
+    private function updateDeliveryStatus(array $notificationIds, string $status): void
+    {
+        Notification::query()
+            ->whereIn('id', $notificationIds)
+            ->update([
+                'delivery_status' => $status,
+                'sent_at' => now(),
+            ]);
+    }
+
+    /**
      * FCM HTTP v1 requires every entry in message.data to be a string.
      *
      * @param  array<string, mixed>  $payload
@@ -202,11 +370,13 @@ class FirebaseMessagingService
         foreach ($payload as $key => $value) {
             if (is_bool($value)) {
                 $normalized[$key] = $value ? 'true' : 'false';
+
                 continue;
             }
 
             if (is_scalar($value)) {
                 $normalized[$key] = (string) $value;
+
                 continue;
             }
 

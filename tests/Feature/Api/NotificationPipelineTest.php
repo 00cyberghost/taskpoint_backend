@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 it('queues push delivery when a push notification is created', function () {
+    config()->set('services.notifications.queue_enabled', true);
     Queue::fake();
 
     $user = User::factory()->create(['role' => 'freelancer']);
@@ -25,6 +26,65 @@ it('queues push delivery when a push notification is created', function () {
     expect($notification)->toBeInstanceOf(Notification::class);
 
     Queue::assertPushed(DispatchPushNotification::class);
+});
+
+it('delivers push notifications synchronously when queueing is disabled', function () {
+    config()->set('services.notifications.queue_enabled', false);
+    Queue::fake();
+
+    $user = User::factory()->create(['role' => 'freelancer']);
+
+    $notification = app(NotificationService::class)->create(
+        $user,
+        'task_assigned',
+        'New task assigned',
+        'A new task is waiting for you.',
+    );
+
+    Queue::assertNothingPushed();
+    expect($notification->fresh()->delivery_status)->toBe('no_tokens');
+});
+
+it('delivers a broadcast to one firebase topic instead of iterating push tokens', function () {
+    config()->set('services.notifications.queue_enabled', false);
+    config()->set('services.firebase.enabled', true);
+    config()->set('services.firebase.project_id', 'demo-project');
+    config()->set('services.firebase.server_key', 'legacy-server-key');
+    config()->set('services.firebase.service_account_json', base_path('tests/Fixtures/firebase-service-account.json'));
+    config()->set('services.firebase.oauth_token_uri', 'https://oauth2.example.test/token');
+    config()->set('services.firebase.endpoint', 'https://fcm.googleapis.com/v1/projects/{project_id}/messages:send');
+    config()->set('services.firebase.topics', [
+        'clients' => 'taskpoint_clients',
+        'freelancers' => 'taskpoint_freelancers',
+        'all' => 'taskpoint_all_users',
+    ]);
+
+    Http::fake([
+        'https://oauth2.example.test/token' => Http::response(['access_token' => 'demo-access-token'], 200),
+        'https://fcm.googleapis.com/v1/projects/demo-project/messages:send' => Http::response(['name' => 'projects/demo/messages/topic-1'], 200),
+    ]);
+
+    $users = User::factory()->count(2)->create([
+        'role' => 'freelancer',
+        'status' => 'active',
+    ]);
+
+    $notifications = app(NotificationService::class)->broadcast(
+        $users,
+        'admin_broadcast',
+        'Platform update',
+        'A new platform update is available.',
+        ['audience' => 'freelancers'],
+        topic: 'taskpoint_freelancers',
+    );
+
+    Http::assertSentCount(2);
+    Http::assertSent(fn ($request) => $request->url() === 'https://fcm.googleapis.com/v1/projects/demo-project/messages:send'
+        && $request['message']['topic'] === 'taskpoint_freelancers'
+        && ! array_key_exists('token', $request['message']));
+
+    expect($notifications)->toHaveCount(2);
+    expect($notifications->every(fn (Notification $notification) => $notification->fresh()->delivery_status === 'sent'))->toBeTrue();
 });
 
 it('marks a notification as no_tokens when the user has no active device tokens', function () {

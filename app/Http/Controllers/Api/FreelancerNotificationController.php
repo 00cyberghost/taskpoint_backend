@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Device;
 use App\Models\Notification;
 use App\Models\PushToken;
+use App\Services\FirebaseMessagingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -72,6 +73,12 @@ class FreelancerNotificationController extends Controller
                 'provider' => $validated['provider'] ?? 'firebase',
                 'active' => true,
             ]
+        );
+
+        $firebaseMessagingService = app(FirebaseMessagingService::class);
+        $firebaseMessagingService->subscribeTokenToTopics(
+            $validated['token'],
+            $firebaseMessagingService->topicsForRole('freelancer'),
         );
 
         return response()->json([

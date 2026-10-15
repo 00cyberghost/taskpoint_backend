@@ -39,8 +39,19 @@ return [
         'enabled' => env('FIREBASE_ENABLED', false),
         'project_id' => env('FIREBASE_PROJECT_ID'),
         'service_account_json' => env('FIREBASE_SERVICE_ACCOUNT_JSON'),
+        'server_key' => env('FIREBASE_SERVER_KEY'),
         'oauth_token_uri' => env('FIREBASE_OAUTH_TOKEN_URI', 'https://oauth2.googleapis.com/token'),
         'endpoint' => env('FIREBASE_ENDPOINT', 'https://fcm.googleapis.com/v1/projects/{project_id}/messages:send'),
+        'topic_management_endpoint' => env('FIREBASE_TOPIC_MANAGEMENT_ENDPOINT', 'https://iid.googleapis.com/iid/v1'),
+        'topics' => [
+            'clients' => env('FIREBASE_CLIENT_TOPIC', 'taskpoint_clients'),
+            'freelancers' => env('FIREBASE_FREELANCER_TOPIC', 'taskpoint_freelancers'),
+            'all' => env('FIREBASE_ALL_USERS_TOPIC', 'taskpoint_all_users'),
+        ],
+    ],
+
+    'notifications' => [
+        'queue_enabled' => env('NOTIFICATIONS_QUEUE_ENABLED', false),
     ],
 
     'google' => [
